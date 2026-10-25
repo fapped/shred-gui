@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;inode/directory;
+X-KDE-Protocols=file
+X-KDE-Submenu=Shred
+X-KDE-Priority=TopLevel
+Icon=edit-delete-shred
+Actions=shredDelete;
+
+[Desktop Action shredDelete]
+Name=Shred and delete permanently…
+Icon=edit-delete-shred
+Exec=shred-gui --preset shred-delete %F

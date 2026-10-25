@@ -1,0 +1,17 @@
+{
+    "format": "shred-gui-settings",
+    "version": 1,
+    "name": "Overwrite only (keep file)",
+    "options": {
+        "iterations": 3,
+        "force": true,
+        "verbose": true,
+        "exact": false,
+        "zero": true,
+        "useSize": false,
+        "size": "",
+        "useRandomSource": false,
+        "randomSource": "",
+        "removeMode": "none"
+    }
+}

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;
+X-KDE-Protocols=file
+X-KDE-Submenu=Shred
+X-KDE-Priority=TopLevel
+Icon=edit-delete-shred
+Actions=shredOverwrite;
+
+[Desktop Action shredOverwrite]
+Name=Overwrite only (keep file)…
+Icon=document-edit
+Exec=shred-gui --preset shred-overwrite %F
