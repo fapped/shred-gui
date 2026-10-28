@@ -41,13 +41,24 @@ foreach(preset IN LISTS SHRED_GUI_PRESETS)
 endforeach()
 
 install(TARGETS shred-gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES packaging/shred-gui.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+# The .desktop files get the absolute path of the installed executable, so that Dolphin and the
+# launcher find it even when <prefix>/bin is not in their PATH (e.g. ~/.local/bin before re-login).
+# They are generated at install time, because `cmake --install --prefix` may change the prefix.
+set(SHRED_GUI_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/packaging)
+install(CODE "
+    set(SHRED_GUI_EXECUTABLE \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/shred-gui\")
+    foreach(file shred-gui.desktop servicemenus/shred-gui-delete.desktop servicemenus/shred-gui-overwrite.desktop)
+        configure_file(\"${CMAKE_CURRENT_SOURCE_DIR}/packaging/\${file}.in\"
+                       \"${SHRED_GUI_GENERATED_DIR}/\${file}\" @ONLY)
+    endforeach()
+")
+install(FILES ${SHRED_GUI_GENERATED_DIR}/shred-gui.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES ${SHRED_GUI_PRESETS} DESTINATION ${CMAKE_INSTALL_DATADIR}/shred-gui/presets)
 if(SHRED_GUI_INSTALL_SERVICEMENUS)
     # KF6 ignores service menus without the executable bit in user directories.
     install(FILES
-        packaging/servicemenus/shred-gui-delete.desktop
-        packaging/servicemenus/shred-gui-overwrite.desktop
+        ${SHRED_GUI_GENERATED_DIR}/servicemenus/shred-gui-delete.desktop
+        ${SHRED_GUI_GENERATED_DIR}/servicemenus/shred-gui-overwrite.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/kio/servicemenus
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     )

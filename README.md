@@ -83,8 +83,9 @@ System-wide installation (executable, `.desktop` entry, presets, Dolphin menu):
 sudo cmake --install build
 ```
 
-Or for the current user only, without root (into `~/.local/bin` and `~/.local/share`;
-`~/.local/bin` has to be in `PATH` so that Dolphin can find `shred-gui`):
+Or for the current user only, without root (into `~/.local/bin` and `~/.local/share`).
+The `.desktop` files get the absolute path of the installed program, so Dolphin finds it even
+before `~/.local/bin` is in `PATH`:
 
 ```bash
 cmake --install build --prefix ~/.local

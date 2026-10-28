@@ -11,4 +11,4 @@ Actions=shredOverwrite;
 [Desktop Action shredOverwrite]
 Name=Overwrite only (keep file)…
 Icon=document-edit
-Exec=shred-gui --preset shred-overwrite %F
+Exec=@SHRED_GUI_EXECUTABLE@ --preset shred-overwrite %U
