@@ -31,7 +31,6 @@
 
 - [ ] Scan large directories in the background (scanning currently blocks the GUI), with cancellation
 - [ ] Check the *Shred* submenu in Dolphin by hand (files: 2 entries, directories: 1 entry)
-- [ ] New Dolphin menu screenshot (`docs/screenshots/context-menu.png` shows the old entry names)
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] Warning about ineffectiveness on SSD / btrfs / ZFS (detect the target's file system type)
