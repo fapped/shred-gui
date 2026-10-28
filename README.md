@@ -18,7 +18,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 - access to **all `shred` options**: `-n`, `-z`, `-f`, `-x`, `-v`, `-s`, `--random-source`,
   `-u` and `--remove=unlink|wipe|wipesync`, choice of the program (`shred`, `gnushred`, any path),
 - preview of the generated command, confirmation dialog with the list of files, progress bar
-  (from the `-v` passes), log, cancellation,
+  (from the `-v` passes), a log with the time of every line (the date in the line that starts a run
+  and when the day changes), cancellation,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (current file, speed, a cancel button, a summary at the end),
 - options are remembered between runs; *Close when finished* quits the application after

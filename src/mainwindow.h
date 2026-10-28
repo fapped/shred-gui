@@ -3,6 +3,7 @@
 #include "shredjob.h"
 #include "shredoptions.h"
 
+#include <QDate>
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPointer>
@@ -75,6 +76,8 @@ private:
     void cancelShred();
     void startDesktopProgress();
     void appendLog(ShredJob::LogLevel level, const QString &text);
+    // `withDate`: the line starts with the date too (the start of a run).
+    void appendLogLines(ShredJob::LogLevel level, const QString &text, bool withDate);
     void onJobFinished();
 
     QString settingsDialogDir() const;
@@ -119,6 +122,7 @@ private:
     QPointer<ShredJob> m_job;
     DesktopProgress *m_desktopProgress = nullptr; // the task manager and the Plasma notification
     QElapsedTimer m_jobTimer;
+    QDate m_logDate; // the date of the last log line - a new day gets a line of its own
     // False while the options come from a preset or a --config file: they are not remembered.
     bool m_rememberOptions = true;
 };

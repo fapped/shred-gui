@@ -25,6 +25,7 @@
       *Load preset*, the options title and the Dolphin menu
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Recently used settings files (*File → Recent settings*)
+- [x] The log starts every line with the time; the date is in the start line and after a change of day
 
 ## To do
 

@@ -32,6 +32,7 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QDateTime>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -935,7 +936,7 @@ void MainWindow::startShred()
 
     for (const QString &note : std::as_const(notes))
         appendLog(ShredJob::LogLevel::Warning, note);
-    appendLog(ShredJob::LogLevel::Info, tr("=== Start: %1 target(s) ===").arg(m_job->plans().size()));
+    appendLogLines(ShredJob::LogLevel::Info, tr("=== Start: %1 target(s) ===").arg(m_job->plans().size()), true);
     startDesktopProgress();
     m_job->start();
     updateControls();
@@ -984,6 +985,11 @@ void MainWindow::cancelShred()
 
 void MainWindow::appendLog(ShredJob::LogLevel level, const QString &text)
 {
+    appendLogLines(level, text, false);
+}
+
+void MainWindow::appendLogLines(ShredJob::LogLevel level, const QString &text, bool withDate)
+{
     QString color;
     switch (level) {
     case ShredJob::LogLevel::Error:
@@ -999,9 +1005,22 @@ void MainWindow::appendLog(ShredJob::LogLevel level, const QString &text)
     case ShredJob::LogLevel::Output:
         break;
     }
-    const QString escaped = text.toHtmlEscaped();
-    m_log->appendHtml(color.isEmpty() ? escaped
-                                      : QStringLiteral("<span style=\"color:%1\">%2</span>").arg(color, escaped));
+    // Every line starts with the time (in grey), also every line of a multi-line message. The date is
+    // in the line that starts a run and in a line of its own when the day changes (e.g. after midnight).
+    const QDateTime now = QDateTime::currentDateTime();
+    const QString date = now.date().toString(Qt::ISODate);
+    if (m_logDate.isValid() && now.date() != m_logDate && !withDate)
+        m_log->appendHtml(QStringLiteral("<span style=\"color:#888888\">--- %1 ---</span>").arg(date));
+    m_logDate = now.date();
+    QString time = now.time().toString(QStringLiteral("HH:mm:ss"));
+    if (withDate)
+        time = date + QLatin1Char(' ') + time;
+    const QString timeHtml = QStringLiteral("<span style=\"color:#888888\">%1</span> ").arg(time);
+    for (const QString &line : text.split(QLatin1Char('\n'))) {
+        const QString escaped = line.toHtmlEscaped();
+        m_log->appendHtml(timeHtml + (color.isEmpty() ? escaped
+                                                      : QStringLiteral("<span style=\"color:%1\">%2</span>").arg(color, escaped)));
+    }
 }
 
 void MainWindow::onJobFinished()
