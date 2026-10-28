@@ -247,6 +247,8 @@ ShredJob::ShredJob(QList<Plan> plans, ShredOptions options, QObject *parent)
     , m_plans(std::move(plans))
     , m_options(std::move(options))
 {
+    m_pollTimer.setInterval(WrittenBytesIntervalMs);
+    connect(&m_pollTimer, &QTimer::timeout, this, &ShredJob::pollWrittenBytes);
     // Each file is one step, plus one step per target for removing symlinks and directories.
     const int passes = m_options.iterations + (m_options.zero ? 1 : 0);
     for (const Plan &plan : std::as_const(m_plans)) {
@@ -254,6 +256,30 @@ ShredJob::ShredJob(QList<Plan> plans, ShredOptions options, QObject *parent)
         for (const qint64 size : plan.fileSizes)
             m_totalBytes += size * passes;
     }
+}
+
+qint64 ShredJob::writtenBytes(qint64 pid)
+{
+    if (pid <= 0)
+        return -1;
+    const QByteArray path = "/proc/" + QByteArray::number(pid) + "/io";
+    const int fd = ::open(path.constData(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    char buffer[512];
+    const ssize_t n = ::read(fd, buffer, sizeof(buffer) - 1);
+    ::close(fd);
+    if (n <= 0)
+        return -1;
+    // "rchar: 1234\nwchar: 5678\n..." - wchar counts the bytes passed to write() (also those not on disk yet).
+    const QByteArray text(buffer, n);
+    const qsizetype start = text.indexOf("wchar: ");
+    if (start < 0)
+        return -1;
+    const qsizetype end = text.indexOf('\n', start);
+    bool ok = false;
+    const qint64 value = text.mid(start + 7, end < 0 ? -1 : end - start - 7).toLongLong(&ok);
+    return ok ? value : -1;
 }
 
 ShredJob::~ShredJob()
@@ -274,6 +300,10 @@ void ShredJob::start()
     m_fileIndex = 0;
     m_doneSteps = 0;
     m_doneBytes = 0;
+    m_fileFraction = 0.0;
+    m_rateSamples.clear();
+    m_rate = 0;
+    m_clock.start();
     m_planAnnounced = false;
     m_summary = {};
     m_cancelRequested = false;
@@ -323,6 +353,7 @@ void ShredJob::startNext()
 void ShredJob::startProcess(const QString &file)
 {
     m_currentFile = file;
+    m_fileFraction = 0.0;
     emit currentFileChanged(file);
     emitProgress(0.0);
 
@@ -337,6 +368,7 @@ void ShredJob::startProcess(const QString &file)
     connect(m_process, &QProcess::errorOccurred, this, &ShredJob::onProcessError);
     setRawArguments(m_process, args);
     m_process->start(m_options.program, args);
+    m_pollTimer.start();
 }
 
 void ShredJob::onReadyRead()
@@ -374,6 +406,7 @@ void ShredJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
 {
     if (!m_process)
         return;
+    m_pollTimer.stop();
     onReadyRead();
     if (!m_pending.trimmed().isEmpty())
         emit log(LogLevel::Output, LocalPath::display(LocalPath::decode(m_pending)).trimmed());
@@ -397,6 +430,7 @@ void ShredJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
     m_doneBytes += currentFileBytes();
     ++m_fileIndex;
     ++m_doneSteps;
+    m_fileFraction = 0.0;
     emitProgress(0.0);
     startNext();
 }
@@ -407,6 +441,7 @@ void ShredJob::onProcessError(QProcess::ProcessError error)
         return;
     emit log(LogLevel::Error, tr("Failed to start \"%1\": %2")
                                   .arg(m_options.program, m_process->errorString()));
+    m_pollTimer.stop();
     m_process->deleteLater();
     m_process = nullptr;
     m_summary.aborted = true;
@@ -460,6 +495,7 @@ void ShredJob::removeLeftovers(const Plan &plan)
 
 void ShredJob::finish()
 {
+    m_pollTimer.stop();
     m_running = false;
     m_currentFile.clear();
     emit currentFileChanged(QString());
@@ -522,7 +558,39 @@ qint64 ShredJob::currentFileBytes() const
 
 void ShredJob::emitProgress(double currentFraction)
 {
-    if (m_totalSteps > 0)
-        emit progress(int(1000.0 * (m_doneSteps + currentFraction) / m_totalSteps));
-    emit processedBytesChanged(m_doneBytes + qint64(currentFraction * currentFileBytes()));
+    // The pass lines and the written bytes may disagree a little - the progress never goes back.
+    m_fileFraction = qBound(m_fileFraction, currentFraction, 1.0);
+    const qint64 processed = m_doneBytes + qint64(m_fileFraction * currentFileBytes());
+    // By the amount written; by the number of steps (files, removing the leftovers) if there is nothing
+    // to write (empty files, devices of unknown size).
+    if (m_totalBytes > 0)
+        emit progress(int(1000 * processed / m_totalBytes));
+    else if (m_totalSteps > 0)
+        emit progress(int(1000.0 * (m_doneSteps + m_fileFraction) / m_totalSteps));
+    emit processedBytesChanged(processed, updateRate(processed));
+}
+
+void ShredJob::pollWrittenBytes()
+{
+    const qint64 fileBytes = currentFileBytes();
+    if (!m_process || fileBytes <= 0)
+        return;
+    const qint64 written = writtenBytes(m_process->processId());
+    // Without -x shred rounds the size up to whole blocks, so it may write a little more than the file size.
+    if (written >= 0)
+        emitProgress(qMin(1.0, double(written) / fileBytes));
+}
+
+qint64 ShredJob::updateRate(qint64 processed)
+{
+    // The speed over the last 3 seconds: smooth enough, and it still drops while shred syncs to the disk.
+    constexpr qint64 windowMs = 3000;
+    const qint64 now = m_clock.elapsed();
+    m_rateSamples.append({now, processed});
+    while (m_rateSamples.size() > 2 && now - m_rateSamples.at(1).first >= windowMs)
+        m_rateSamples.removeFirst();
+    const auto &[firstMs, firstBytes] = m_rateSamples.first();
+    if (now - firstMs >= WrittenBytesIntervalMs)
+        m_rate = (processed - firstBytes) * 1000 / (now - firstMs);
+    return m_rate;
 }

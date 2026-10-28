@@ -2,10 +2,14 @@
 
 #include "shredoptions.h"
 
+#include <QElapsedTimer>
+#include <QList>
 #include <QObject>
+#include <QPair>
 #include <QPointer>
 #include <QProcess>
 #include <QStringList>
+#include <QTimer>
 
 // Runs shred on files, or recursively on the whole content of directories,
 // and then removes the emptied directories (deepest first, the target last).
@@ -72,10 +76,15 @@ public:
     // The amount shred writes: the size of all files times the number of passes (an estimate with -s).
     qint64 totalBytes() const { return m_totalBytes; }
 
+    // The number of bytes the process has written so far (the "wchar" line of /proc/<pid>/io), -1 if unknown.
+    static qint64 writtenBytes(qint64 pid);
+    static constexpr int WrittenBytesIntervalMs = 500;
+
 signals:
     void log(ShredJob::LogLevel level, const QString &text);
     void progress(int permille);
-    void processedBytesChanged(qint64 bytes); // of totalBytes(), estimated from the passes
+    // The amount written of totalBytes() and the current speed (over the last few seconds).
+    void processedBytesChanged(qint64 bytes, qint64 bytesPerSecond);
     void currentFileChanged(const QString &path);
     void finished();
 
@@ -89,6 +98,8 @@ private:
     void removeLeftovers(const Plan &plan);
     void finish();
     void emitProgress(double currentFraction);
+    void pollWrittenBytes();
+    qint64 updateRate(qint64 processed);
     qint64 currentFileBytes() const; // what shred writes for the current file
 
     QList<Plan> m_plans;
@@ -103,6 +114,13 @@ private:
     qsizetype m_totalSteps = 0;
     qint64 m_totalBytes = 0;
     qint64 m_doneBytes = 0; // written for the finished files
+    double m_fileFraction = 0.0; // of the current file, never decreasing
+    // shred reports only the start of each pass, so the amount written by the running process is read
+    // from /proc every WrittenBytesIntervalMs.
+    QTimer m_pollTimer;
+    QElapsedTimer m_clock;
+    QList<QPair<qint64, qint64>> m_rateSamples; // (ms since start, bytes processed)
+    qint64 m_rate = 0;
     bool m_planAnnounced = false;
     bool m_running = false;
     bool m_cancelRequested = false;

@@ -15,6 +15,7 @@
 #include <QTest>
 
 #include <algorithm>
+#include <limits>
 #include <numeric>
 
 #include <cstring>
@@ -142,6 +143,7 @@ private slots:
     void shredNonUtf8Names_data();
     void shredNonUtf8Names();
     void processedBytes();
+    void writtenBytesOfProcess();
     void summaryFlags();
     void presetNamesMatchDolphinMenu();
 };
@@ -814,11 +816,29 @@ void TestShredCore::processedBytes()
 
     QList<qint64> processed;
     connect(&job, &ShredJob::processedBytesChanged, this, [&processed](qint64 bytes) { processed << bytes; });
+    QList<int> progress;
+    connect(&job, &ShredJob::progress, this, [&progress](int permille) { progress << permille; });
     QVERIFY(runJob(job));
     QVERIFY(job.summary().ok());
     QVERIFY(!processed.isEmpty());
     QVERIFY(std::is_sorted(processed.cbegin(), processed.cend()));
     QCOMPARE(processed.last(), job.totalBytes());
+    // The progress follows the amount written.
+    QVERIFY(std::is_sorted(progress.cbegin(), progress.cend()));
+    QCOMPARE(progress.last(), 1000);
+}
+
+void TestShredCore::writtenBytesOfProcess()
+{
+    const qint64 pid = QCoreApplication::applicationPid();
+    const qint64 before = ShredJob::writtenBytes(pid);
+    QVERIFY(before >= 0);
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath(QStringLiteral("data")), QByteArray(1 << 20, 'x'));
+    QVERIFY(ShredJob::writtenBytes(pid) >= before + (1 << 20));
+    QCOMPARE(ShredJob::writtenBytes(0), qint64(-1));
+    QCOMPARE(ShredJob::writtenBytes(std::numeric_limits<int>::max()), qint64(-1)); // no such process
 }
 
 void TestShredCore::summaryFlags()

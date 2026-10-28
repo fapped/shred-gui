@@ -18,7 +18,7 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 - access to **all `shred` options**: `-n`, `-z`, `-f`, `-x`, `-v`, `-s`, `--random-source`,
   `-u` and `--remove=unlink|wipe|wipesync`, choice of the program (`shred`, `gnushred`, any path),
 - preview of the generated command, confirmation dialog with the list of files, progress bar
-  (from the `-v` passes), a log with the time of every line (the date in the line that starts a run
+  (by the amount written), a log with the time of every line (the date in the line that starts a run
   and when the day changes), cancellation,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (current file, speed, a cancel button, a summary at the end),
@@ -211,10 +211,12 @@ While shredding runs, its progress is also shown
   application),
 - as a job in the Plasma notification area (`org.kde.JobViewServerV2`): the target, the number of
   files and the amount to write (size × passes), the current file ("File 3 of 12: …"), percentage,
-  and a button that cancels shredding. Under *Details* Plasma draws a **speed graph**; shred reports
-  only whole passes (GNU shred also the progress of long passes), so the amount written is estimated
-  from them and the speed is the average since the start. When the job ends, the notification shows
-  a summary ("1,8 GiB written in 0:00:03", "Cancelled after …" or the error).
+  and a button that cancels shredding. Under *Details* Plasma draws a **speed graph** with the
+  current and the average speed. shred itself reports only the start of each pass, so every 0.5 s
+  the application reads how much the running shred process has written (`wchar` in
+  `/proc/<pid>/io`, a few microseconds per read); the speed is taken over the last 3 seconds, so it
+  drops while shred syncs the data to the disk after each pass. When the job ends, the notification
+  shows a summary ("2,73 GiB written in 0:00:10", "Cancelled after …" or the error).
 
 On other desktops or without a session bus this does nothing.
 

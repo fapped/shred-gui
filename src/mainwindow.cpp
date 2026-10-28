@@ -958,13 +958,10 @@ void MainWindow::startDesktopProgress()
                                .arg(passes);
     m_desktopProgress->start(tr("Shredding"), target, amount);
     m_desktopProgress->setTotalBytes(m_job->totalBytes());
-    m_jobTimer.start();
 
     connect(m_job, &ShredJob::progress, m_desktopProgress, &DesktopProgress::setProgress);
-    // shred reports whole passes only, so the speed is the average since the start.
-    connect(m_job, &ShredJob::processedBytesChanged, m_desktopProgress, [this](qint64 bytes) {
-        const qint64 ms = qMax<qint64>(1, m_jobTimer.elapsed());
-        m_desktopProgress->setSpeed(bytes * 1000 / ms, bytes);
+    connect(m_job, &ShredJob::processedBytesChanged, m_desktopProgress, [this](qint64 bytes, qint64 bytesPerSecond) {
+        m_desktopProgress->setSpeed(bytesPerSecond, bytes);
     });
     auto fileNumber = std::make_shared<qsizetype>(0);
     connect(m_job, &ShredJob::currentFileChanged, m_desktopProgress, [this, files, fileNumber](const QString &file) {
