@@ -17,6 +17,10 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   subdirectories are removed (deepest first) and finally the directory itself,
 - access to **all `shred` options**: `-n`, `-z`, `-f`, `-x`, `-v`, `-s`, `--random-source`,
   `-u` and `--remove=unlink|wipe|wipesync`, choice of the program (`shred`, `gnushred`, any path),
+- **warnings where overwriting does not reach the old data**: flash storage (SSD, USB stick, memory
+  card), copy-on-write and log-structured file systems (btrfs, ZFS, F2FS, …), network, overlay and
+  FUSE file systems, and files with other **hard links**,
+- large directories are scanned in the background (the number of entries is shown, *Cancel* stops it),
 - preview of the generated command, confirmation dialog with the list of files, progress bar
   (by the amount written), a log with the time of every line (the date in the line that starts a run
   and when the day changes), cancellation,
@@ -186,8 +190,8 @@ ready-made profiles (quick, paranoid, overwrite only). Options imported with
 
 ## How shredding a directory works
 
-1. Scanning (without following symlinks and without crossing into other file systems).
-   Duplicates in the list and targets inside another directory from the list are skipped (the
+1. Scanning (without following symlinks and without crossing into other file systems), in the
+   background - the window shows the number of entries read so far and *Cancel* stops it. Duplicates in the list and targets inside another directory from the list are skipped (the
    parent directory processes them); invalid targets (missing, symlinks, protected) can be skipped.
 2. Every regular file: `shred <options> -- <file>` (one process per file).
 3. Symlinks, FIFOs, sockets and device files inside the directory are only removed
@@ -228,6 +232,9 @@ On other desktops or without a session bus this does nothing.
 - A target that is a symbolic link is rejected — select the real path instead.
 - Recursive shredding of `/`, the home directory and the main system directories is refused.
 - Mount points of other file systems inside a directory are skipped (and reported).
+- Files with other hard links are counted in the confirmation (and listed under *Show Details…*):
+  their data is overwritten under all names, but `-u` removes only the selected name.
+- The confirmation warns when the storage of a target does not overwrite in place (see below).
 - A confirmation with the number of files and the command is always shown before starting
   (*Show Details…* lists the files):
 
@@ -238,6 +245,23 @@ On other desktops or without a session bus this does nothing.
 `shred` assumes that data is overwritten in place. On SSDs (wear leveling, TRIM), copy-on-write
 file systems (btrfs, ZFS), with snapshots, compression, RAID, NFS or in backups the data may
 survive. See `man shred` for details.
+
+Before shredding, the application checks the storage of every target and lists what it finds in the
+confirmation and in the log:
+
+| Detected | How | Why the old data may survive |
+|---|---|---|
+| flash storage: SSD, NVMe, USB stick, memory card | `/sys/class/block/…/queue/rotational` = 0 or `removable` = 1; device mapper (LUKS, LVM) and RAID devices are decided by the devices below them, loop devices by the storage of their backing file | the controller writes new data to other cells (wear leveling, spare area) |
+| copy-on-write: btrfs, ZFS, bcachefs | file system type from `/proc/self/mountinfo` | new data goes to new blocks; snapshots keep the old ones |
+| log-structured: F2FS, NILFS2, JFFS2, UBIFS | " | new data is appended, the old blocks stay until reused |
+| network: NFS, SMB/CIFS, sshfs, … | " | depends on the server's storage, snapshots and backups |
+| overlay, FUSE | " | the lower layer / the storage below is not under control |
+
+A whole block device selected as the target (e.g. `/dev/sdb`) is checked as a device. The warnings
+do not stop shredding: the data is still overwritten as far as the storage allows it. Not detected:
+ext3/ext4 with `data=journal`, the journal itself, compression, backups, and USB adapters of hard
+disks that claim to be removable (a false warning). On flash storage, full-disk encryption from the
+start or the device's own secure erase (`blkdiscard --secure`, `nvme format --ses`) protect reliably.
 
 ## AI disclosure
 

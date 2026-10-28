@@ -17,6 +17,7 @@ add_library(shredcore STATIC
     src/localpath.h src/localpath.cpp
     src/shredoptions.h src/shredoptions.cpp
     src/shredjob.h src/shredjob.cpp
+    src/storagecheck.h src/storagecheck.cpp
 )
 target_include_directories(shredcore PUBLIC src)
 target_link_libraries(shredcore PUBLIC Qt6::Core)

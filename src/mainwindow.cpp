@@ -33,6 +33,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QDateTime>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -45,6 +46,12 @@ constexpr int kMaxListedPaths = 500;
 constexpr int kPathRole = Qt::UserRole;
 constexpr int kMaxRecentSettings = 10;
 const QString kRecentSettingsKey = QStringLiteral("paths/recentSettings");
+
+struct ScanResult
+{
+    QList<ShredJob::Plan> plans;
+    QStringList notes;
+};
 
 QString typeDescription(ShredJob::TargetType type)
 {
@@ -254,6 +261,12 @@ void MainWindow::buildUi()
     m_currentFile = new QLabel(central);
     m_currentFile->setTextInteractionFlags(Qt::TextSelectableByMouse);
     mainLayout->addWidget(m_currentFile);
+    m_scanTimer = new QTimer(this);
+    m_scanTimer->setInterval(200);
+    connect(m_scanTimer, &QTimer::timeout, this, [this] {
+        if (m_scanControl)
+            m_currentFile->setText(tr("Scanning... %L1 entries").arg(m_scanControl->entries.load()));
+    });
 
     // --- Log ---
     auto *logBox = new QGroupBox(tr("Log"), central);
@@ -603,7 +616,7 @@ void MainWindow::updatePreview()
 
 void MainWindow::updateControls()
 {
-    const bool running = m_job && m_job->isRunning();
+    const bool running = isBusy();
     m_targetBox->setEnabled(!running);
     m_optionsBox->setEnabled(!running);
     if (m_importAction)
@@ -758,7 +771,7 @@ bool MainWindow::loadPreset(const QString &name)
 
 void MainWindow::importSettings()
 {
-    if (m_job && m_job->isRunning())
+    if (isBusy())
         return;
     const QString file = QFileDialog::getOpenFileName(this, tr("Import settings"), settingsDialogDir(),
                                                       settingsFileFilter());
@@ -803,20 +816,53 @@ void MainWindow::showAbout()
 
 void MainWindow::startShred()
 {
-    if (m_job && m_job->isRunning())
+    if (isBusy())
         return;
 
-    ShredOptions options = currentOptions();
-    if (const QString error = options.validate(); !error.isEmpty()) {
+    if (const QString error = currentOptions().validate(); !error.isEmpty()) {
         QMessageBox::warning(this, tr("Invalid options"), error);
         return;
     }
 
-    QStringList notes;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const QList<ShredJob::Plan> scanned = ShredJob::scanAll(targets(), &notes);
-    QApplication::restoreOverrideCursor();
+    // The window stays responsive during the scan, and Cancel stops it.
+    auto control = std::make_shared<ShredJob::ScanControl>();
+    auto result = std::make_shared<ScanResult>();
+    QThread *thread = QThread::create([paths = targets(), control, result] {
+        result->plans = ShredJob::scanAll(paths, &result->notes, control.get());
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    connect(thread, &QThread::finished, this, [this, control, result] {
+        if (m_scanControl != control)
+            return; // the window is closing
+        m_scanControl.reset();
+        m_scanTimer->stop();
+        m_progress->setRange(0, 1000);
+        m_progress->setValue(0);
+        m_currentFile->clear();
+        updateControls();
+        if (control->cancelled)
+            appendLog(ShredJob::LogLevel::Warning, tr("Scanning cancelled."));
+        else
+            confirmAndStart(result->plans, result->notes);
+    });
+    m_scanControl = control;
+    m_scanThread = thread;
+    m_progress->setRange(0, 0); // busy indicator
+    m_currentFile->setText(tr("Scanning..."));
+    m_scanTimer->start();
+    thread->start();
+    updateControls();
+}
 
+bool MainWindow::isBusy() const
+{
+    return m_scanControl || (m_job && m_job->isRunning());
+}
+
+void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QStringList &notes)
+{
+    // The options cannot change during the scan (they are disabled).
+    ShredOptions options = currentOptions();
     QList<ShredJob::Plan> plans;
     QStringList errors;
     for (const ShredJob::Plan &plan : scanned) {
@@ -857,6 +903,8 @@ void MainWindow::startShred()
     qsizetype skipped = 0;
     bool anySpecial = false;
     QStringList listed;
+    QStringList hardLinked;
+    QStringList storageWarnings;
     for (const ShredJob::Plan &plan : std::as_const(plans)) {
         files += plan.files.size();
         others += plan.others.size();
@@ -864,6 +912,12 @@ void MainWindow::startShred()
         skipped += plan.skipped.size();
         dirTargets += plan.isDirectory() ? 1 : 0;
         anySpecial = anySpecial || plan.type == ShredJob::TargetType::Special;
+        for (const QString &path : plan.hardLinked)
+            hardLinked << LocalPath::display(path);
+        for (const QString &warning : plan.storageWarnings) {
+            if (!storageWarnings.contains(warning))
+                storageWarnings << warning;
+        }
         for (const QStringList *list : {&plan.files, &plan.others}) {
             for (const QString &path : *list) {
                 if (listed.size() < kMaxListedPaths)
@@ -902,8 +956,19 @@ void MainWindow::startShred()
     }
     if (anySpecial)
         text += tr("<br><br><b>A special file (e.g. a block device) is selected - its entire content will be overwritten!</b>");
-    else if (options.removesFiles())
-        text += tr("<br><br>If a file has other hard links, their data will be destroyed as well.");
+    if (!hardLinked.isEmpty()) {
+        text += options.removesFiles()
+                    ? tr("<br><br><b>Warning:</b> %n file(s) have other hard links. The data is overwritten under all "
+                         "names, but only the selected name is removed - the other names stay (with the overwritten "
+                         "content).", nullptr, int(hardLinked.size()))
+                    : tr("<br><br><b>Warning:</b> %n file(s) have other hard links. The data is overwritten under all "
+                         "names.", nullptr, int(hardLinked.size()));
+    }
+    if (!storageWarnings.isEmpty()) {
+        text += tr("<br><br><b>Overwriting may not destroy the old data here:</b>");
+        for (const QString &warning : std::as_const(storageWarnings))
+            text += QStringLiteral("<br>&bull; ") + warning.toHtmlEscaped();
+    }
     for (const QString &note : std::as_const(notes))
         text += QStringLiteral("<br>") + note.toHtmlEscaped();
     text += tr("<br><br>Command:<br><code>%1</code><br><br><b>This operation cannot be undone.</b>")
@@ -912,6 +977,11 @@ void MainWindow::startShred()
     QString details = listed.join(QLatin1Char('\n'));
     if (files + others > listed.size())
         details += tr("\n... and %1 more").arg(files + others - listed.size());
+    if (!hardLinked.isEmpty()) {
+        details += tr("\n\nFiles with other hard links:\n") + hardLinked.mid(0, kMaxListedPaths).join(QLatin1Char('\n'));
+        if (hardLinked.size() > kMaxListedPaths)
+            details += tr("\n... and %1 more").arg(hardLinked.size() - kMaxListedPaths);
+    }
 
     QMessageBox box(QMessageBox::Warning, tr("Confirm shredding"), text, QMessageBox::NoButton, this);
     box.setTextFormat(Qt::RichText);
@@ -937,6 +1007,14 @@ void MainWindow::startShred()
     for (const QString &note : std::as_const(notes))
         appendLog(ShredJob::LogLevel::Warning, note);
     appendLogLines(ShredJob::LogLevel::Info, tr("=== Start: %1 target(s) ===").arg(m_job->plans().size()), true);
+    for (const QString &warning : std::as_const(storageWarnings))
+        appendLog(ShredJob::LogLevel::Warning, warning);
+    if (!hardLinked.isEmpty()) {
+        appendLog(ShredJob::LogLevel::Warning,
+                  tr("%n file(s) with other hard links: %1", nullptr, int(hardLinked.size()))
+                      .arg(hardLinked.mid(0, 10).join(QStringLiteral(", "))
+                           + (hardLinked.size() > 10 ? QStringLiteral(", ...") : QString())));
+    }
     startDesktopProgress();
     m_job->start();
     updateControls();
@@ -976,7 +1054,9 @@ void MainWindow::startDesktopProgress()
 
 void MainWindow::cancelShred()
 {
-    if (m_job)
+    if (m_scanControl)
+        m_scanControl->cancelled = true;
+    else if (m_job)
         m_job->cancel();
 }
 
@@ -1040,7 +1120,7 @@ void MainWindow::onJobFinished()
         // A short moment to see the result; unchecking the box in the meantime keeps the window open.
         m_currentFile->setText(tr("Finished successfully. Closing..."));
         QTimer::singleShot(1500, this, [this] {
-            if (m_closeWhenFinishedCheck->isChecked() && !(m_job && m_job->isRunning()))
+            if (m_closeWhenFinishedCheck->isChecked() && !isBusy())
                 close();
         });
     } else if (summary.ok()) {
@@ -1053,6 +1133,12 @@ void MainWindow::onJobFinished()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_scanControl) {
+        m_scanControl->cancelled = true;
+        m_scanControl.reset();
+        if (m_scanThread)
+            m_scanThread->wait();
+    }
     if (m_job && m_job->isRunning()) {
         const auto answer = QMessageBox::question(
             this, tr("Shredding in progress"),
@@ -1071,7 +1157,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
 {
-    if (!(m_job && m_job->isRunning()) && event->mimeData()->hasUrls())
+    if (!isBusy() && event->mimeData()->hasUrls())
         event->acceptProposedAction();
 }
 

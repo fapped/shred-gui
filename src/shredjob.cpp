@@ -1,5 +1,6 @@
 #include "shredjob.h"
 #include "localpath.h"
+#include "storagecheck.h"
 
 #include <QDir>
 #include <QFile>
@@ -17,6 +18,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 namespace {
@@ -28,7 +30,7 @@ QString errnoString(int err)
 
 // Recursively collects the content of a directory without following symlinks
 // and without crossing into other file systems.
-bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan)
+bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan, ShredJob::ScanControl *control)
 {
     DIR *d = ::opendir(dir.constData());
     if (!d) {
@@ -44,6 +46,14 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
         const char *name = entry->d_name;
         if (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0)
             continue;
+        if (control) {
+            if (control->cancelled) {
+                plan.error = QObject::tr("Scanning cancelled.");
+                ::closedir(d);
+                return false;
+            }
+            ++control->entries;
+        }
         const QByteArray path = dir + '/' + name;
         struct stat st;
         if (::lstat(path.constData(), &st) != 0) {
@@ -61,6 +71,8 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
         } else if (S_ISREG(st.st_mode)) {
             plan.files << LocalPath::decode(path);
             plan.fileSizes << st.st_size;
+            if (st.st_nlink > 1)
+                plan.hardLinked << plan.files.constLast();
         } else {
             // Symlinks are deliberately NOT passed to shred - it would destroy the file they point to.
             plan.others << LocalPath::decode(path);
@@ -76,7 +88,7 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
 
     std::sort(subdirs.begin(), subdirs.end());
     for (const QByteArray &sub : std::as_const(subdirs)) {
-        if (!scanDirectory(sub, rootDevice, plan))
+        if (!scanDirectory(sub, rootDevice, plan, control))
             return false;
     }
     plan.dirs << LocalPath::decode(dir);
@@ -162,7 +174,7 @@ bool ShredJob::isProtectedPath(const QString &path)
     return !home.isEmpty() && canonical == home;
 }
 
-ShredJob::Plan ShredJob::scan(const QString &target)
+ShredJob::Plan ShredJob::scan(const QString &target, ScanControl *control)
 {
     Plan plan;
     plan.target = target.isEmpty() ? QString() : QDir::cleanPath(QFileInfo(target).absoluteFilePath());
@@ -177,10 +189,24 @@ ShredJob::Plan ShredJob::scan(const QString &target)
                          .arg(LocalPath::display(plan.target));
         break;
     case TargetType::File:
-    case TargetType::Special:
+    case TargetType::Special: {
         plan.files << plan.target;
-        plan.fileSizes << (plan.type == TargetType::File ? LocalPath::info(plan.target).size : 0);
+        struct stat st;
+        if (::lstat(LocalPath::encode(plan.target).constData(), &st) != 0) {
+            plan.fileSizes << 0;
+            break;
+        }
+        plan.fileSizes << (plan.type == TargetType::File ? qint64(st.st_size) : 0);
+        if (plan.type == TargetType::File && st.st_nlink > 1)
+            plan.hardLinked << plan.target;
+        // A block device is overwritten as a whole - what matters is the device itself, not /dev.
+        if (S_ISBLK(st.st_mode))
+            plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspectDevice(::major(st.st_rdev),
+                                                                                      ::minor(st.st_rdev)));
+        else if (plan.type == TargetType::File)
+            plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspect(plan.target));
         break;
+    }
     case TargetType::Directory: {
         if (isProtectedPath(plan.target)) {
             plan.error = QObject::tr("Directory \"%1\" is protected (root, home or system directory).")
@@ -194,19 +220,22 @@ ShredJob::Plan ShredJob::scan(const QString &target)
             plan.error = QObject::tr("Cannot read \"%1\": %2").arg(LocalPath::display(plan.target), errnoString(err));
             break;
         }
-        scanDirectory(root, st.st_dev, plan);
+        if (scanDirectory(root, st.st_dev, plan, control))
+            plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspect(plan.target));
         break;
     }
     }
     return plan;
 }
 
-QList<ShredJob::Plan> ShredJob::scanAll(const QStringList &targets, QStringList *notes)
+QList<ShredJob::Plan> ShredJob::scanAll(const QStringList &targets, QStringList *notes, ScanControl *control)
 {
     QList<Plan> plans;
     QStringList canonicalPaths;
     for (const QString &target : targets) {
-        Plan plan = scan(target);
+        Plan plan = scan(target, control);
+        if (control && control->cancelled)
+            return {};
         const QString canonical = LocalPath::canonical(plan.target);
         if (!canonical.isEmpty() && canonicalPaths.contains(canonical)) {
             if (notes)

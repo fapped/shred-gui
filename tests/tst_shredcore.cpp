@@ -1,6 +1,7 @@
 #include "localpath.h"
 #include "shredjob.h"
 #include "shredoptions.h"
+#include "storagecheck.h"
 
 #include <QDir>
 #include <QJsonDocument>
@@ -146,6 +147,12 @@ private slots:
     void writtenBytesOfProcess();
     void summaryFlags();
     void presetNamesMatchDolphinMenu();
+    void mountInfo();
+    void flashDevices();
+    void storageWarnings();
+    void inspectRealPaths();
+    void scanFindsHardLinks();
+    void scanCanBeCancelled();
 };
 
 namespace {
@@ -896,6 +903,160 @@ void TestShredCore::presetNamesMatchDolphinMenu()
         QVERIFY2(it.value().second.contains(QStringLiteral("--preset ") + presets.at(i).id + QLatin1Char(' ')),
                  qPrintable(it.value().second));
     }
+}
+
+void TestShredCore::mountInfo()
+{
+    const QByteArray text =
+        "22 1 253:1 / / rw,relatime shared:1 - ext4 /dev/mapper/root rw\n"
+        "30 22 0:24 / /tmp rw,noatime shared:5 - tmpfs tmpfs rw,inode64\n"
+        "40 22 0:38 / /media/my\\040share rw,relatime shared:11 - autofs systemd-1 rw,fd=33\n"
+        "41 40 0:57 / /media/my\\040share rw,relatime shared:12 - cifs //server/share rw,vers=3.1.1\n"
+        "50 22 0:60 /@home /home rw,relatime shared:30 - btrfs /dev/nvme0n1p3 rw,subvol=/@home\n"
+        "garbage line\n";
+
+    // By the device number.
+    StorageCheck::Info info = StorageCheck::parseMountInfo(text, 253, 1, QStringLiteral("/etc/fstab"));
+    QCOMPARE(info.fileSystem, QStringLiteral("ext4"));
+    QCOMPARE(info.source, QStringLiteral("/dev/mapper/root"));
+    QCOMPARE(info.mountPoint, QStringLiteral("/"));
+    // A mount point with an escaped space; the later mount over autofs wins.
+    info = StorageCheck::parseMountInfo(text, 0, 57, QStringLiteral("/media/my share/a.txt"));
+    QCOMPARE(info.fileSystem, QStringLiteral("cifs"));
+    QCOMPARE(info.mountPoint, QStringLiteral("/media/my share"));
+    // A btrfs subvolume that is not mounted on its own (another device number): the longest prefix.
+    info = StorageCheck::parseMountInfo(text, 0, 77, QStringLiteral("/home/user/.snapshots/1/x"));
+    QCOMPARE(info.fileSystem, QStringLiteral("btrfs"));
+    QCOMPARE(info.source, QStringLiteral("/dev/nvme0n1p3"));
+    // "/tmpfoo" is not under "/tmp".
+    info = StorageCheck::parseMountInfo(text, 0, 99, QStringLiteral("/tmpfoo/x"));
+    QCOMPARE(info.fileSystem, QStringLiteral("ext4"));
+    QVERIFY(StorageCheck::parseMountInfo(QByteArray(), 253, 1, QStringLiteral("/")).fileSystem.isEmpty());
+}
+
+void TestShredCore::flashDevices()
+{
+    // A fake /sys: disks with partitions, a device mapper device on a hard disk and on an SSD, a USB stick.
+    QTemporaryDir sys;
+    QVERIFY(sys.isValid());
+    auto mkdev = [&](const QString &dir, const QByteArray &rotational, const QByteArray &removable) {
+        QVERIFY(QDir().mkpath(sys.filePath(dir + QStringLiteral("/queue"))));
+        writeFile(sys.filePath(dir + QStringLiteral("/queue/rotational")), rotational + '\n');
+        writeFile(sys.filePath(dir + QStringLiteral("/removable")), removable + '\n');
+    };
+    mkdev(QStringLiteral("sda"), "1", "0");
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("sda/sda1"))));
+    mkdev(QStringLiteral("nvme0n1"), "0", "0");
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("nvme0n1/nvme0n1p2"))));
+    mkdev(QStringLiteral("sdb"), "1", "1");
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("sdb/sdb1"))));
+    mkdev(QStringLiteral("dm-0"), "0", "0"); // claims to be non-rotational
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("dm-0/slaves"))));
+    QVERIFY(QFile::link(sys.filePath(QStringLiteral("sda/sda1")), sys.filePath(QStringLiteral("dm-0/slaves/sda1"))));
+    mkdev(QStringLiteral("dm-1"), "1", "0");
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("dm-1/slaves"))));
+    QVERIFY(QFile::link(sys.filePath(QStringLiteral("sda/sda1")), sys.filePath(QStringLiteral("dm-1/slaves/sda1"))));
+    QVERIFY(QFile::link(sys.filePath(QStringLiteral("nvme0n1/nvme0n1p2")),
+                        sys.filePath(QStringLiteral("dm-1/slaves/nvme0n1p2"))));
+
+    QVERIFY(!StorageCheck::isFlashDevice(sys.filePath(QStringLiteral("sda"))));
+    QVERIFY(!StorageCheck::isFlashDevice(sys.filePath(QStringLiteral("sda/sda1"))));
+    QVERIFY(StorageCheck::isFlashDevice(sys.filePath(QStringLiteral("nvme0n1/nvme0n1p2"))));
+    QVERIFY(StorageCheck::isFlashDevice(sys.filePath(QStringLiteral("sdb/sdb1"))));     // removable
+    QVERIFY(!StorageCheck::isFlashDevice(sys.filePath(QStringLiteral("dm-0"))));        // decided by sda1
+    QVERIFY(StorageCheck::isFlashDevice(sys.filePath(QStringLiteral("dm-1"))));         // RAID with an SSD
+    QVERIFY(!StorageCheck::isFlashDevice(sys.filePath(QStringLiteral("missing"))));
+}
+
+void TestShredCore::storageWarnings()
+{
+    StorageCheck::Info info;
+    info.fileSystem = QStringLiteral("ext4");
+    info.mountPoint = QStringLiteral("/data");
+    QVERIFY(StorageCheck::warnings(info).isEmpty());
+    info.flash = true;
+    QStringList warnings = StorageCheck::warnings(info);
+    QCOMPARE(warnings.size(), 1);
+    QVERIFY(warnings.first().startsWith(QStringLiteral("/data (ext4): flash storage")));
+
+    info.fileSystem = QStringLiteral("btrfs");
+    warnings = StorageCheck::warnings(info);
+    QCOMPARE(warnings.size(), 2);
+    QVERIFY(warnings.first().contains(QStringLiteral("copy-on-write")));
+
+    info.flash = false;
+    for (const char *fs : {"zfs", "bcachefs", "f2fs", "nfs4", "cifs", "fuse.sshfs", "overlay", "fuse.gocryptfs"}) {
+        info.fileSystem = QString::fromLatin1(fs);
+        QCOMPARE(StorageCheck::warnings(info).size(), 1);
+    }
+    for (const char *fs : {"ext4", "xfs", "vfat", "exfat", "ntfs3", "fuseblk", "tmpfs", ""}) {
+        info.fileSystem = QString::fromLatin1(fs);
+        QVERIFY2(StorageCheck::warnings(info).isEmpty(), fs);
+    }
+
+    // A block device selected directly is named by its device.
+    StorageCheck::Info device;
+    device.source = QStringLiteral("/dev/sdb");
+    device.flash = true;
+    QVERIFY(StorageCheck::warnings(device).first().startsWith(QStringLiteral("/dev/sdb: flash storage")));
+}
+
+void TestShredCore::inspectRealPaths()
+{
+    // Whatever the machine has, the root file system is found.
+    const StorageCheck::Info root = StorageCheck::inspect(QStringLiteral("/"));
+    QVERIFY(!root.fileSystem.isEmpty());
+    QCOMPARE(root.mountPoint, QStringLiteral("/"));
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QVERIFY(!StorageCheck::inspect(tmp.path()).fileSystem.isEmpty());
+    QVERIFY(StorageCheck::inspect(tmp.filePath(QStringLiteral("missing"))).fileSystem.isEmpty());
+    // /proc is not on a block device.
+    const StorageCheck::Info proc = StorageCheck::inspect(QStringLiteral("/proc/self"));
+    QCOMPARE(proc.fileSystem, QStringLiteral("proc"));
+    QVERIFY(!proc.flash);
+}
+
+void TestShredCore::scanFindsHardLinks()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString root = tmp.filePath(QStringLiteral("target"));
+    QVERIFY(QDir().mkpath(root));
+    writeFile(root + QStringLiteral("/single"), "1");
+    writeFile(root + QStringLiteral("/linked"), "2");
+    const QString outsideName = tmp.filePath(QStringLiteral("other-name"));
+    QCOMPARE(::link(QFile::encodeName(root + QStringLiteral("/linked")).constData(),
+                    QFile::encodeName(outsideName).constData()), 0);
+
+    const ShredJob::Plan dir = ShredJob::scan(root);
+    QVERIFY2(dir.error.isEmpty(), qPrintable(dir.error));
+    QCOMPARE(dir.files.size(), 2);
+    QCOMPARE(dir.hardLinked, QStringList{root + QStringLiteral("/linked")});
+
+    QCOMPARE(ShredJob::scan(outsideName).hardLinked, QStringList{outsideName});
+    QVERIFY(ShredJob::scan(root + QStringLiteral("/single")).hardLinked.isEmpty());
+}
+
+void TestShredCore::scanCanBeCancelled()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString root = tmp.filePath(QStringLiteral("target"));
+    QVERIFY(QDir().mkpath(root + QStringLiteral("/sub")));
+    for (int i = 0; i < 5; ++i)
+        writeFile(root + QStringLiteral("/sub/f%1").arg(i), "x");
+
+    ShredJob::ScanControl control;
+    QList<ShredJob::Plan> plans = ShredJob::scanAll({root}, nullptr, &control);
+    QCOMPARE(plans.size(), 1);
+    QCOMPARE(plans.first().files.size(), 5);
+    QCOMPARE(control.entries.load(), 6); // sub + 5 files
+
+    control.cancelled = true;
+    QVERIFY(ShredJob::scanAll({root}, nullptr, &control).isEmpty());
+    const ShredJob::Plan plan = ShredJob::scan(root, &control);
+    QVERIFY(!plan.error.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestShredCore)

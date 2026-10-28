@@ -11,6 +11,8 @@
 #include <QStringList>
 #include <QTimer>
 
+#include <atomic>
+
 // Runs shred on files, or recursively on the whole content of directories,
 // and then removes the emptied directories (deepest first, the target last).
 // Targets are processed one after another, one shred process per file.
@@ -34,6 +36,8 @@ public:
         QStringList others;  // symlinks, FIFOs, sockets, devices - unlink only
         QStringList dirs;    // directories to remove, deepest first, the target last
         QStringList skipped; // mount points of other file systems - skipped
+        QStringList hardLinked; // files of `files` with other hard links (names elsewhere)
+        QStringList storageWarnings; // where overwriting in place does not reach the old data (see StorageCheck)
         QString error;       // non-empty if the target cannot be processed
 
         bool isDirectory() const { return type == TargetType::Directory; }
@@ -56,11 +60,20 @@ public:
         }
     };
 
+    // Lets another thread follow and cancel a scan.
+    struct ScanControl
+    {
+        std::atomic<bool> cancelled{false};
+        std::atomic<qint64> entries{0}; // directory entries read so far
+    };
+
     static TargetType targetType(const QString &path);
-    static Plan scan(const QString &target);
+    static Plan scan(const QString &target, ScanControl *control = nullptr);
     // Scans several targets, skipping duplicates and targets nested inside another directory target
     // (described in `notes`). Plans with a non-empty error are kept so that the caller can report them.
-    static QList<Plan> scanAll(const QStringList &targets, QStringList *notes = nullptr);
+    // Returns an empty list if the scan was cancelled through `control`.
+    static QList<Plan> scanAll(const QStringList &targets, QStringList *notes = nullptr,
+                               ScanControl *control = nullptr);
     // Paths that must never be processed recursively (/, the home directory, system directories).
     static bool isProtectedPath(const QString &path);
 

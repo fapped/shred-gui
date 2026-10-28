@@ -7,6 +7,8 @@
 #include <QMainWindow>
 #include <QPointer>
 
+#include <memory>
+
 class DesktopProgress;
 class QAction;
 class QCheckBox;
@@ -21,6 +23,8 @@ class QPlainTextEdit;
 class QProgressBar;
 class QPushButton;
 class QSpinBox;
+class QThread;
+class QTimer;
 
 class MainWindow : public QMainWindow
 {
@@ -71,7 +75,9 @@ private:
     void importSettings();
     void exportSettings();
     void showAbout();
+    bool isBusy() const; // scanning or shredding
     void startShred();
+    void confirmAndStart(const QList<ShredJob::Plan> &scanned, const QStringList &notes);
     void cancelShred();
     void startDesktopProgress();
     void appendLog(ShredJob::LogLevel level, const QString &text);
@@ -119,6 +125,10 @@ private:
     QPlainTextEdit *m_log = nullptr;
 
     QPointer<ShredJob> m_job;
+    // The scan before the confirmation runs in a thread (large directories take a while).
+    std::shared_ptr<ShredJob::ScanControl> m_scanControl;
+    QPointer<QThread> m_scanThread;
+    QTimer *m_scanTimer = nullptr; // shows the number of entries scanned so far
     DesktopProgress *m_desktopProgress = nullptr; // the task manager and the Plasma notification
     QDate m_logDate; // the date of the last log line - a new day gets a line of its own
     // False while the options come from a preset or a --config file: they are not remembered.

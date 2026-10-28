@@ -26,17 +26,17 @@
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Recently used settings files (*File → Recent settings*)
 - [x] The log starts every line with the time; the date is in the start line and after a change of day
+- [x] *Shred* submenu in Dolphin checked by the user (files: 2 entries, directories: 1 entry)
+- [x] Warnings about storage that does not overwrite in place (flash, copy-on-write, log-structured,
+      network, overlay, FUSE) and about files with other hard links
+- [x] Scanning in the background with the number of entries and cancellation
 
 ## To do
 
-- [ ] Scan large directories in the background (scanning currently blocks the GUI), with cancellation
-- [ ] Check the *Shred* submenu in Dolphin by hand (files: 2 entries, directories: 1 entry)
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
-- [ ] Warning about ineffectiveness on SSD / btrfs / ZFS (detect the target's file system type)
-- [ ] Warning about hard links (`st_nlink > 1`) in the list of files
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
       dialog or a custom one would be needed
 - [ ] Optional: running as root (pkexec) for files without permissions
 - [ ] Nautilus / Nemo integration (scripts or an extension)
-- [ ] `.deb` package / AppImage, CI (GitHub Actions: build + tests)
+- [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
