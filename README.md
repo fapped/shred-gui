@@ -24,7 +24,7 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 - options are remembered between runs; *Close when finished* quits the application after
   a fully successful run (after errors or cancelling the window stays open),
 - export/import of the configuration to/from JSON files (*File → Export/Import settings*,
-  *Export… / Import…* buttons),
+  *Export… / Import…* buttons), recently used files in *File → Recent settings*,
 - **presets** shipped with the application (`--preset`, *File → Load preset*) and integration
   with the **Dolphin** context menu (*Shred* submenu).
 

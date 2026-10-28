@@ -42,6 +42,8 @@ namespace {
 
 constexpr int kMaxListedPaths = 500;
 constexpr int kPathRole = Qt::UserRole;
+constexpr int kMaxRecentSettings = 10;
+const QString kRecentSettingsKey = QStringLiteral("paths/recentSettings");
 
 QString typeDescription(ShredJob::TargetType type)
 {
@@ -325,6 +327,9 @@ void MainWindow::buildMenus()
     m_exportAction = fileMenu->addAction(QIcon::fromTheme(QStringLiteral("document-save")),
                                          tr("&Export settings..."), this, &MainWindow::exportSettings);
     m_exportAction->setShortcut(QKeySequence::Save);
+    m_recentSettingsMenu = fileMenu->addMenu(QIcon::fromTheme(QStringLiteral("document-open-recent")),
+                                             tr("&Recent settings"));
+    connect(m_recentSettingsMenu, &QMenu::aboutToShow, this, &MainWindow::populateRecentSettingsMenu);
     fileMenu->addSeparator();
     QAction *quit = fileMenu->addAction(QIcon::fromTheme(QStringLiteral("application-exit")), tr("&Quit"), this,
                                         &QWidget::close);
@@ -358,6 +363,37 @@ void MainWindow::populatePresetMenu()
     }
     m_presetMenu->addSeparator();
     m_presetMenu->addAction(tr("Presets are used for this session only"))->setEnabled(false);
+}
+
+void MainWindow::populateRecentSettingsMenu()
+{
+    m_recentSettingsMenu->clear();
+    m_recentSettingsMenu->setToolTipsVisible(true);
+    // Files that no longer exist are dropped from the list.
+    QStringList files = QSettings().value(kRecentSettingsKey).toStringList();
+    files.erase(std::remove_if(files.begin(), files.end(), [](const QString &f) { return !QFileInfo(f).isFile(); }),
+                files.end());
+    QSettings().setValue(kRecentSettingsKey, files);
+    if (files.isEmpty()) {
+        m_recentSettingsMenu->addAction(tr("No recent settings files"))->setEnabled(false);
+        return;
+    }
+    for (const QString &file : std::as_const(files)) {
+        QString error;
+        QString name;
+        ShredOptions::loadFromFile(file, &error, ShredOptions(), &name);
+        const QString fileName = QFileInfo(file).fileName();
+        QString text = name.isEmpty() || name == QFileInfo(file).completeBaseName()
+            ? fileName
+            : tr("%1 (%2)").arg(name, fileName);
+        QAction *action = m_recentSettingsMenu->addAction(text.replace(QLatin1Char('&'), QStringLiteral("&&")), this,
+                                                          [this, file] { importSettingsFile(file, Persistence::Remember); });
+        action->setToolTip(error.isEmpty() ? file : error);
+        action->setEnabled(error.isEmpty());
+    }
+    m_recentSettingsMenu->addSeparator();
+    m_recentSettingsMenu->addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), tr("Clear list"), this,
+                                    [] { QSettings().remove(kRecentSettingsKey); });
 }
 
 void MainWindow::loadSettings()
@@ -573,6 +609,8 @@ void MainWindow::updateControls()
         m_importAction->setEnabled(!running);
     if (m_presetMenu)
         m_presetMenu->setEnabled(!running);
+    if (m_recentSettingsMenu)
+        m_recentSettingsMenu->setEnabled(!running);
     m_sizeEdit->setEnabled(m_sizeCheck->isChecked());
     m_randomEdit->setEnabled(m_randomCheck->isChecked());
     m_randomBrowse->setEnabled(m_randomCheck->isChecked());
@@ -659,6 +697,20 @@ void MainWindow::rememberSettingsDialogDir(const QString &file) const
     QSettings().setValue(QStringLiteral("paths/settingsDir"), QFileInfo(file).absolutePath());
 }
 
+void MainWindow::rememberRecentSettingsFile(const QString &file)
+{
+    const QString path = QFileInfo(file).absoluteFilePath();
+    // Presets have their own menu.
+    for (const QString &dir : ShredOptions::presetSearchPaths()) {
+        if (QFileInfo(path).absolutePath() == QFileInfo(dir).absoluteFilePath())
+            return;
+    }
+    QStringList files = QSettings().value(kRecentSettingsKey).toStringList();
+    files.removeAll(path);
+    files.prepend(path);
+    QSettings().setValue(kRecentSettingsKey, files.mid(0, kMaxRecentSettings));
+}
+
 bool MainWindow::importSettingsFile(const QString &path, Persistence persistence)
 {
     QString error;
@@ -672,6 +724,7 @@ bool MainWindow::importSettingsFile(const QString &path, Persistence persistence
     if (name.isEmpty())
         name = QFileInfo(path).completeBaseName();
     applyOptions(options);
+    rememberRecentSettingsFile(path);
 
     if (persistence == Persistence::Remember) {
         m_rememberOptions = true;
@@ -729,6 +782,7 @@ void MainWindow::exportSettings()
         QMessageBox::warning(this, tr("Export failed"), error);
         return;
     }
+    rememberRecentSettingsFile(file);
     appendLog(ShredJob::LogLevel::Info, tr("Exported settings to %1").arg(file));
     statusBar()->showMessage(tr("Exported settings to %1").arg(file), 8000);
 }

@@ -47,6 +47,7 @@ private:
     void buildUi();
     void buildMenus();
     void populatePresetMenu();
+    void populateRecentSettingsMenu();
     void loadSettings();
     void saveSettings() const;
     void setOptionsSource(const QString &description);
@@ -78,6 +79,7 @@ private:
 
     QString settingsDialogDir() const;
     void rememberSettingsDialogDir(const QString &file) const;
+    void rememberRecentSettingsFile(const QString &file);
 
     static QString normalizePath(const QString &text);
 
@@ -104,6 +106,7 @@ private:
     QAction *m_importAction = nullptr;
     QAction *m_exportAction = nullptr;
     QMenu *m_presetMenu = nullptr;
+    QMenu *m_recentSettingsMenu = nullptr;
 
     QLineEdit *m_previewEdit = nullptr;
     QPushButton *m_startButton = nullptr;
