@@ -3,9 +3,11 @@
 #include "shredjob.h"
 #include "shredoptions.h"
 
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPointer>
 
+class DesktopProgress;
 class QAction;
 class QCheckBox;
 class QComboBox;
@@ -70,6 +72,7 @@ private:
     void showAbout();
     void startShred();
     void cancelShred();
+    void startDesktopProgress();
     void appendLog(ShredJob::LogLevel level, const QString &text);
     void onJobFinished();
 
@@ -110,6 +113,8 @@ private:
     QPlainTextEdit *m_log = nullptr;
 
     QPointer<ShredJob> m_job;
+    DesktopProgress *m_desktopProgress = nullptr; // the task manager and the Plasma notification
+    QElapsedTimer m_jobTimer;
     // False while the options come from a preset or a --config file: they are not remembered.
     bool m_rememberOptions = true;
 };

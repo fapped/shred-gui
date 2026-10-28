@@ -19,6 +19,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   `-u` and `--remove=unlink|wipe|wipesync`, choice of the program (`shred`, `gnushred`, any path),
 - preview of the generated command, confirmation dialog with the list of files, progress bar
   (from the `-v` passes), log, cancellation,
+- **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
+  notification area (current file, speed, a cancel button, a summary at the end),
 - options are remembered between runs,
 - export/import of the configuration to/from JSON files (*File → Export/Import settings*,
   *Export… / Import…* buttons),
@@ -29,7 +31,7 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 
 ## Requirements
 
-- Linux, Qt 6 (Core, Widgets; Test for the tests), CMake ≥ 3.19, a C++17 compiler
+- Linux, Qt 6 (Core, Widgets, DBus; Test for the tests), CMake ≥ 3.19, a C++17 compiler
 - `shred` (coreutils) — on Ubuntu 25.10+ `/usr/bin/shred` is the uutils (Rust) version
   and GNU shred is available as `gnushred`; both are supported.
 
@@ -192,6 +194,22 @@ Removing a directory requires removing its files — if "Do not remove" is selec
 application offers to enable `-u`.
 
 ![The log after shredding a directory and a file](docs/screenshots/shred-gui-finished.png)
+
+## Progress outside the window
+
+While shredding runs, its progress is also shown
+
+- on the Shred GUI entry in the task manager (the `com.canonical.Unity.LauncherEntry` D-Bus signal,
+  supported by Plasma; the entry is matched by `shred-gui.desktop`, so it works for the installed
+  application),
+- as a job in the Plasma notification area (`org.kde.JobViewServerV2`): the target, the number of
+  files and the amount to write (size × passes), the current file ("File 3 of 12: …"), percentage,
+  and a button that cancels shredding. Under *Details* Plasma draws a **speed graph**; shred reports
+  only whole passes (GNU shred also the progress of long passes), so the amount written is estimated
+  from them and the speed is the average since the start. When the job ends, the notification shows
+  a summary ("1,8 GiB written in 0:00:03", "Cancelled after …" or the error).
+
+On other desktops or without a session bus this does nothing.
 
 ## Safeguards
 

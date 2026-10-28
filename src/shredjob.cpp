@@ -60,6 +60,7 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
                 subdirs << path;
         } else if (S_ISREG(st.st_mode)) {
             plan.files << LocalPath::decode(path);
+            plan.fileSizes << st.st_size;
         } else {
             // Symlinks are deliberately NOT passed to shred - it would destroy the file they point to.
             plan.others << LocalPath::decode(path);
@@ -178,6 +179,7 @@ ShredJob::Plan ShredJob::scan(const QString &target)
     case TargetType::File:
     case TargetType::Special:
         plan.files << plan.target;
+        plan.fileSizes << (plan.type == TargetType::File ? LocalPath::info(plan.target).size : 0);
         break;
     case TargetType::Directory: {
         if (isProtectedPath(plan.target)) {
@@ -246,8 +248,12 @@ ShredJob::ShredJob(QList<Plan> plans, ShredOptions options, QObject *parent)
     , m_options(std::move(options))
 {
     // Each file is one step, plus one step per target for removing symlinks and directories.
-    for (const Plan &plan : std::as_const(m_plans))
+    const int passes = m_options.iterations + (m_options.zero ? 1 : 0);
+    for (const Plan &plan : std::as_const(m_plans)) {
         m_totalSteps += plan.files.size() + 1;
+        for (const qint64 size : plan.fileSizes)
+            m_totalBytes += size * passes;
+    }
 }
 
 ShredJob::~ShredJob()
@@ -267,6 +273,7 @@ void ShredJob::start()
     m_planIndex = 0;
     m_fileIndex = 0;
     m_doneSteps = 0;
+    m_doneBytes = 0;
     m_planAnnounced = false;
     m_summary = {};
     m_cancelRequested = false;
@@ -338,6 +345,8 @@ void ShredJob::onReadyRead()
         return;
     m_pending += m_process->readAll();
     static const QRegularExpression passRe(QStringLiteral("(\\d+)/(\\d+)"));
+    // GNU shred reports the progress of long passes: "...pass 1/3 (random)...1.2GiB/4.0GiB 30%".
+    static const QRegularExpression percentRe(QStringLiteral("(\\d+)%$"));
     qsizetype nl;
     while ((nl = m_pending.indexOf('\n')) >= 0) {
         // shred prints the file name as it is - keep bytes that are not valid UTF-8 readable.
@@ -353,8 +362,10 @@ void ShredJob::onReadyRead()
         if (m.hasMatch()) {
             const int pass = m.captured(1).toInt();
             const int total = m.captured(2).toInt();
+            const QRegularExpressionMatch percent = percentRe.match(tail);
+            const double passFraction = percent.hasMatch() ? qMin(100, percent.captured(1).toInt()) / 100.0 : 0.0;
             if (total > 0 && pass > 0 && pass <= total)
-                emitProgress(double(pass - 1) / total);
+                emitProgress((pass - 1 + passFraction) / total);
         }
     }
 }
@@ -383,8 +394,10 @@ void ShredJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
 
     m_process->deleteLater();
     m_process = nullptr;
+    m_doneBytes += currentFileBytes();
     ++m_fileIndex;
     ++m_doneSteps;
+    emitProgress(0.0);
     startNext();
 }
 
@@ -497,8 +510,19 @@ void ShredJob::setRawArguments(QProcess *process, const QStringList &args) const
     process->setChildProcessModifier([bytes, argv] { ::execv(argv->front(), argv->data()); });
 }
 
+qint64 ShredJob::currentFileBytes() const
+{
+    if (m_planIndex >= m_plans.size())
+        return 0;
+    const Plan &plan = m_plans.at(m_planIndex);
+    if (m_fileIndex >= plan.fileSizes.size())
+        return 0;
+    return plan.fileSizes.at(m_fileIndex) * (m_options.iterations + (m_options.zero ? 1 : 0));
+}
+
 void ShredJob::emitProgress(double currentFraction)
 {
     if (m_totalSteps > 0)
         emit progress(int(1000.0 * (m_doneSteps + currentFraction) / m_totalSteps));
+    emit processedBytesChanged(m_doneBytes + qint64(currentFraction * currentFileBytes()));
 }

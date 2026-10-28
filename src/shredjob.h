@@ -26,6 +26,7 @@ public:
         QString target;
         TargetType type = TargetType::Missing;
         QStringList files;   // regular files passed to shred
+        QList<qint64> fileSizes; // the sizes of `files` (0 for special files)
         QStringList others;  // symlinks, FIFOs, sockets, devices - unlink only
         QStringList dirs;    // directories to remove, deepest first, the target last
         QStringList skipped; // mount points of other file systems - skipped
@@ -68,10 +69,13 @@ public:
     bool isRunning() const { return m_running; }
     const Summary &summary() const { return m_summary; }
     const QList<Plan> &plans() const { return m_plans; }
+    // The amount shred writes: the size of all files times the number of passes (an estimate with -s).
+    qint64 totalBytes() const { return m_totalBytes; }
 
 signals:
     void log(ShredJob::LogLevel level, const QString &text);
     void progress(int permille);
+    void processedBytesChanged(qint64 bytes); // of totalBytes(), estimated from the passes
     void currentFileChanged(const QString &path);
     void finished();
 
@@ -85,6 +89,7 @@ private:
     void removeLeftovers(const Plan &plan);
     void finish();
     void emitProgress(double currentFraction);
+    qint64 currentFileBytes() const; // what shred writes for the current file
 
     QList<Plan> m_plans;
     ShredOptions m_options;
@@ -96,6 +101,8 @@ private:
     qsizetype m_fileIndex = 0;
     qsizetype m_doneSteps = 0;
     qsizetype m_totalSteps = 0;
+    qint64 m_totalBytes = 0;
+    qint64 m_doneBytes = 0; // written for the finished files
     bool m_planAnnounced = false;
     bool m_running = false;
     bool m_cancelRequested = false;

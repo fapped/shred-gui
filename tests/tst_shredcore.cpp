@@ -15,6 +15,7 @@
 #include <QTest>
 
 #include <algorithm>
+#include <numeric>
 
 #include <cstring>
 #include <dirent.h>
@@ -140,6 +141,7 @@ private slots:
     void localPathUrlsAndQuoting();
     void shredNonUtf8Names_data();
     void shredNonUtf8Names();
+    void processedBytes();
 };
 
 namespace {
@@ -784,6 +786,37 @@ void TestShredCore::shredNonUtf8Names()
     QCOMPARE(job.summary().othersRemoved, 1);
     QCOMPARE(job.summary().dirsRemoved, 2);
     QVERIFY(!rawExists(dir));
+}
+
+void TestShredCore::processedBytes()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString dir = tmp.filePath(QStringLiteral("dir"));
+    QVERIFY(QDir().mkpath(dir + QStringLiteral("/sub")));
+    writeFile(dir + QStringLiteral("/a"), QByteArray(1000, 'a'));
+    writeFile(dir + QStringLiteral("/sub/b"), QByteArray(234, 'b'));
+    const QString file = tmp.filePath(QStringLiteral("file"));
+    writeFile(file, QByteArray(5, 'f'));
+
+    const ShredJob::Plan plan = ShredJob::scan(dir);
+    QCOMPARE(plan.fileSizes.size(), plan.files.size());
+    QCOMPARE(std::accumulate(plan.fileSizes.cbegin(), plan.fileSizes.cend(), qint64(0)), qint64(1234));
+
+    ShredOptions options;
+    options.iterations = 2;
+    options.zero = true; // 3 passes
+    options.removeMode = ShredOptions::RemoveMode::Unlink;
+    ShredJob job(QList<ShredJob::Plan>{plan, ShredJob::scan(file)}, options);
+    QCOMPARE(job.totalBytes(), qint64(1239 * 3));
+
+    QList<qint64> processed;
+    connect(&job, &ShredJob::processedBytesChanged, this, [&processed](qint64 bytes) { processed << bytes; });
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QVERIFY(!processed.isEmpty());
+    QVERIFY(std::is_sorted(processed.cbegin(), processed.cend()));
+    QCOMPARE(processed.last(), job.totalBytes());
 }
 
 QTEST_GUILESS_MAIN(TestShredCore)

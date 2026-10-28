@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "desktopprogress.h"
 #include "localpath.h"
 
 #include <QAction>
@@ -33,6 +34,8 @@
 #include <QStatusBar>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include <memory>
 
 namespace {
 
@@ -74,6 +77,8 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(tr("Shred GUI"));
     setWindowIcon(QIcon::fromTheme(QStringLiteral("edit-delete")));
     setAcceptDrops(true);
+    m_desktopProgress = new DesktopProgress(this);
+    connect(m_desktopProgress, &DesktopProgress::cancelRequested, this, &MainWindow::cancelShred);
     buildUi();
     buildMenus();
     loadSettings();
@@ -860,8 +865,44 @@ void MainWindow::startShred()
     for (const QString &note : std::as_const(notes))
         appendLog(ShredJob::LogLevel::Warning, note);
     appendLog(ShredJob::LogLevel::Info, tr("=== Start: %1 target(s) ===").arg(m_job->plans().size()));
+    startDesktopProgress();
     m_job->start();
     updateControls();
+}
+
+void MainWindow::startDesktopProgress()
+{
+    const QList<ShredJob::Plan> &plans = m_job->plans();
+    QString target = plans.isEmpty() ? QString() : LocalPath::display(plans.first().target);
+    if (plans.size() > 1)
+        target = tr("%1 (+%2 more)").arg(target).arg(plans.size() - 1);
+    qsizetype files = 0;
+    for (const ShredJob::Plan &plan : plans)
+        files += plan.files.size();
+    const ShredOptions options = currentOptions();
+    const int passes = options.iterations + (options.zero ? 1 : 0);
+    const QString amount = tr("%n file(s), %1 to write (%2 pass(es))", nullptr, int(files))
+                               .arg(QLocale().formattedDataSize(m_job->totalBytes()))
+                               .arg(passes);
+    m_desktopProgress->start(tr("Shredding"), target, amount);
+    m_desktopProgress->setTotalBytes(m_job->totalBytes());
+    m_jobTimer.start();
+
+    connect(m_job, &ShredJob::progress, m_desktopProgress, &DesktopProgress::setProgress);
+    // shred reports whole passes only, so the speed is the average since the start.
+    connect(m_job, &ShredJob::processedBytesChanged, m_desktopProgress, [this](qint64 bytes) {
+        const qint64 ms = qMax<qint64>(1, m_jobTimer.elapsed());
+        m_desktopProgress->setSpeed(bytes * 1000 / ms, bytes);
+    });
+    auto fileNumber = std::make_shared<qsizetype>(0);
+    connect(m_job, &ShredJob::currentFileChanged, m_desktopProgress, [this, files, fileNumber](const QString &file) {
+        if (file.isEmpty())
+            return;
+        m_desktopProgress->setInfo(tr("File %1 of %2: %3")
+                                       .arg(++*fileNumber)
+                                       .arg(files)
+                                       .arg(LocalPath::display(QFileInfo(file).fileName())));
+    });
 }
 
 void MainWindow::cancelShred()
@@ -902,6 +943,12 @@ void MainWindow::onJobFinished()
             delete m_targetList->takeItem(i);
     }
     refreshTargets();
+    if (summary.ok())
+        m_desktopProgress->finish(false);
+    else if (summary.cancelled)
+        m_desktopProgress->finish(true);
+    else
+        m_desktopProgress->finish(false, tr("Not everything could be shredded or removed."));
     if (summary.ok()) {
         statusBar()->showMessage(tr("Finished successfully."), 10000);
     } else if (!summary.cancelled) {
@@ -922,6 +969,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
             return;
         }
         delete m_job; // the destructor kills the shred process
+        m_desktopProgress->finish(true);
     }
     saveSettings();
     event->accept();

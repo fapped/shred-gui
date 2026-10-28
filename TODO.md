@@ -19,6 +19,8 @@
 
 - [x] File names that are not valid UTF-8: kept exactly (command line, URLs, drag & drop, clipboard),
       passed to shred as bytes, shown with `\xNN`
+- [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6),
+      with a cancel button, a speed graph and a summary at the end
 
 ## To do
 
