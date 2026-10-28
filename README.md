@@ -220,6 +220,9 @@ While shredding runs, its progress is also shown
 
 On other desktops or without a session bus this does nothing.
 
+![The Plasma notification with the speed graph (Details expanded)](docs/screenshots/shred-gui-notification.png)
+![The finished notification](docs/screenshots/shred-gui-notification-finished.png)
+
 ## Safeguards
 
 - A target that is a symbolic link is rejected — select the real path instead.
