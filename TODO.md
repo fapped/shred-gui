@@ -35,6 +35,8 @@
 
 ## To do
 
+- [ ] Later: the speed graph also in the application window, not only in the Plasma notification
+      (e.g. a live speed graph in place of the progress bar, with the progress shown over it)
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
