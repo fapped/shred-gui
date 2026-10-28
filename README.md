@@ -82,6 +82,12 @@ cmake --install build --prefix ~/.local
 
 The Dolphin menu can be skipped with `cmake -S . -B build -DSHRED_GUI_INSTALL_SERVICEMENUS=OFF`.
 
+Uninstalling (removes exactly the files listed by the last `cmake --install` from this build directory):
+
+```bash
+xargs -d '\n' rm -v < build/install_manifest.txt
+```
+
 ## Presets
 
 Installed into `<prefix>/share/shred-gui/presets/`:

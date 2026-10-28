@@ -15,12 +15,12 @@
 - [x] Presets `shred-delete` / `shred-overwrite` (`--preset`, `--list-presets`, *Load preset* menu), session only
 - [x] Target list (many files/directories at once, pasting many paths, duplicates/nesting)
 - [x] Dolphin context menu (*Shred* submenu), installed by CMake
+- [x] Installed for the user into `~/.local` (2026-10-28); the older service menu removed
 
 ## To do
 
 - [ ] Scan large directories in the background (scanning currently blocks the GUI), with cancellation
-- [ ] Check the Dolphin menu after installing on a live system (so far only installed into `DESTDIR`)
-- [ ] Remove the older service menu after installation (user's decision)
+- [ ] Check the *Shred* submenu in Dolphin by hand (files: 2 entries, directories: 1 entry)
 - [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)

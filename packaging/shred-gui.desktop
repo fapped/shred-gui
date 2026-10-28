@@ -5,4 +5,4 @@ Comment=Securely overwrite and delete files and directories using shred
 Exec=shred-gui %F
 Icon=edit-delete
 Terminal=false
-Categories=Utility;Security;Qt;
+Categories=System;Security;Qt;
