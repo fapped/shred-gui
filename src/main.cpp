@@ -1,3 +1,4 @@
+#include "localpath.h"
 #include "mainwindow.h"
 #include "shredoptions.h"
 
@@ -33,9 +34,14 @@ int main(int argc, char *argv[])
     parser.addOption(presetOption);
     parser.addOption(configOption);
     parser.addOption(listPresetsOption);
-    parser.addPositionalArgument(QStringLiteral("paths"), QStringLiteral("Files or directories to add to the list."),
+    parser.addPositionalArgument(QStringLiteral("paths"), QStringLiteral("Files or directories to add to the list (paths or file:// URLs)."),
                                  QStringLiteral("[paths...]"));
-    parser.process(app);
+    // QCoreApplication::arguments() would replace bytes that are not valid UTF-8 in file names;
+    // the raw argv (Qt's own options already removed by QApplication) is decoded losslessly.
+    QStringList arguments;
+    for (int i = 0; i < argc; ++i)
+        arguments << LocalPath::decode(QByteArray(argv[i]));
+    parser.process(arguments);
 
     if (parser.isSet(listPresetsOption)) {
         const QMap<QString, QString> presets = ShredOptions::availablePresets();

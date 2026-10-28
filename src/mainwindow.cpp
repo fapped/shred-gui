@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "localpath.h"
 
 #include <QAction>
 #include <QApplication>
@@ -407,7 +408,7 @@ QString MainWindow::normalizePath(const QString &text)
         path = path.mid(1, path.size() - 2);
     }
     if (path.startsWith(QStringLiteral("file://")))
-        path = QUrl(path).toLocalFile();
+        path = LocalPath::fromFileUrl(path); // keeps bytes that are not valid UTF-8 (see LocalPath)
     if (path == QStringLiteral("~"))
         path = QDir::homePath();
     else if (path.startsWith(QStringLiteral("~/")))
@@ -425,7 +426,7 @@ void MainWindow::addTargets(const QStringList &paths)
         const QString path = normalizePath(raw);
         if (path.isEmpty() || existing.contains(path))
             continue;
-        auto *item = new QListWidgetItem(path, m_targetList);
+        auto *item = new QListWidgetItem(LocalPath::display(path), m_targetList);
         item->setData(kPathRole, path);
         refreshTargetItem(item);
         existing << path;
@@ -455,7 +456,7 @@ void MainWindow::refreshTargetItem(QListWidgetItem *item)
     switch (type) {
     case ShredJob::TargetType::File:
         icon = QStringLiteral("text-x-generic");
-        tooltip += tr(", %1").arg(QLocale().formattedDataSize(QFileInfo(path).size()));
+        tooltip += tr(", %1").arg(QLocale().formattedDataSize(LocalPath::info(path).size));
         break;
     case ShredJob::TargetType::Directory:
         if (ShredJob::isProtectedPath(path)) {
@@ -470,7 +471,7 @@ void MainWindow::refreshTargetItem(QListWidgetItem *item)
         break;
     case ShredJob::TargetType::Symlink:
         icon = QStringLiteral("dialog-error");
-        tooltip += tr(" (points to: %1)").arg(QFileInfo(path).symLinkTarget());
+        tooltip += tr(" (points to: %1)").arg(LocalPath::display(LocalPath::info(path).symLinkTarget));
         break;
     case ShredJob::TargetType::Missing:
         icon = QStringLiteral("dialog-error");
@@ -534,7 +535,7 @@ void MainWindow::updatePreview()
     else if (paths.size() > 1)
         target = tr("<each file of the %1 targets>").arg(paths.size());
     else if (ShredJob::targetType(paths.first()) == ShredJob::TargetType::Directory)
-        target = tr("<each file in %1>").arg(paths.first());
+        target = tr("<each file in %1>").arg(LocalPath::display(paths.first()));
     else
         target = shellQuote(paths.first());
     m_previewEdit->setText(commandLine(options.program, options.arguments()) + QStringLiteral(" -- ") + target);
@@ -578,8 +579,9 @@ void MainWindow::pasteTargets()
     QStringList paths;
     if (mime->hasUrls()) {
         for (const QUrl &url : mime->urls()) {
+            // Encoded URLs keep the exact bytes of names that are not valid UTF-8 (see LocalPath).
             if (url.isLocalFile())
-                paths << url.toLocalFile();
+                paths << url.toString(QUrl::FullyEncoded);
         }
     } else {
         paths = mime->text().split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -788,18 +790,19 @@ void MainWindow::startShred()
         for (const QStringList *list : {&plan.files, &plan.others}) {
             for (const QString &path : *list) {
                 if (listed.size() < kMaxListedPaths)
-                    listed << path;
+                    listed << LocalPath::display(path);
             }
         }
     }
 
     QString text;
     if (plans.size() == 1 && plans.first().isDirectory()) {
-        text = tr("Directory <b>%1</b> will be recursively shredded and removed.").arg(plans.first().target.toHtmlEscaped());
+        text = tr("Directory <b>%1</b> will be recursively shredded and removed.")
+                   .arg(LocalPath::display(plans.first().target).toHtmlEscaped());
     } else if (plans.size() == 1) {
         text = options.removesFiles() ? tr("File <b>%1</b> will be overwritten and removed.")
                                       : tr("File <b>%1</b> will be overwritten (not removed).");
-        text = text.arg(plans.first().target.toHtmlEscaped());
+        text = text.arg(LocalPath::display(plans.first().target).toHtmlEscaped());
     } else {
         text = tr("<b>%1</b> targets (%2 file(s), %3 director(y/ies)) will be shredded")
                    .arg(plans.size())
@@ -850,7 +853,7 @@ void MainWindow::startShred()
     connect(m_job, &ShredJob::log, this, &MainWindow::appendLog);
     connect(m_job, &ShredJob::progress, m_progress, &QProgressBar::setValue);
     connect(m_job, &ShredJob::currentFileChanged, this, [this](const QString &file) {
-        m_currentFile->setText(file.isEmpty() ? QString() : tr("Current file: %1").arg(file));
+        m_currentFile->setText(file.isEmpty() ? QString() : tr("Current file: %1").arg(LocalPath::display(file)));
     });
     connect(m_job, &ShredJob::finished, this, &MainWindow::onJobFinished);
 
@@ -935,7 +938,7 @@ void MainWindow::dropEvent(QDropEvent *event)
     QStringList paths;
     for (const QUrl &url : event->mimeData()->urls()) {
         if (url.isLocalFile())
-            paths << url.toLocalFile();
+            paths << url.toString(QUrl::FullyEncoded);
     }
     if (paths.isEmpty())
         return;

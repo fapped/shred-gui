@@ -1,9 +1,12 @@
+#include "localpath.h"
 #include "shredjob.h"
 #include "shredoptions.h"
 
 #include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRandomGenerator>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QFile>
 #include <QSignalSpy>
@@ -13,7 +16,11 @@
 
 #include <algorithm>
 
+#include <cstring>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -35,6 +42,54 @@ QByteArray readFile(const QString &path)
 QString tmpMissingDir()
 {
     return QDir::tempPath() + QStringLiteral("/shred-gui-test-missing-dir");
+}
+
+void writeRaw(const QByteArray &path, const QByteArray &data)
+{
+    const int fd = ::open(path.constData(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    QVERIFY(fd >= 0);
+    QCOMPARE(::write(fd, data.constData(), data.size()), ssize_t(data.size()));
+    ::close(fd);
+}
+
+QByteArray readRaw(const QByteArray &path)
+{
+    const int fd = ::open(path.constData(), O_RDONLY);
+    if (fd < 0)
+        return "<missing>";
+    QByteArray data(4096, '\0');
+    const ssize_t n = ::read(fd, data.data(), data.size());
+    ::close(fd);
+    return data.left(qMax<ssize_t>(0, n));
+}
+
+bool rawExists(const QByteArray &path)
+{
+    struct stat st;
+    return ::lstat(path.constData(), &st) == 0;
+}
+
+// QTemporaryDir cannot remove such names (Qt converts them), so they are removed with raw bytes.
+void removeTree(const QByteArray &path)
+{
+    struct stat st;
+    if (::lstat(path.constData(), &st) != 0)
+        return;
+    if (S_ISDIR(st.st_mode)) {
+        if (DIR *d = ::opendir(path.constData())) {
+            QList<QByteArray> children;
+            while (dirent *entry = ::readdir(d)) {
+                if (std::strcmp(entry->d_name, ".") != 0 && std::strcmp(entry->d_name, "..") != 0)
+                    children << path + '/' + entry->d_name;
+            }
+            ::closedir(d);
+            for (const QByteArray &child : std::as_const(children))
+                removeTree(child);
+        }
+        ::rmdir(path.constData());
+    } else {
+        ::unlink(path.constData());
+    }
 }
 
 bool runJob(ShredJob &job)
@@ -79,6 +134,12 @@ private slots:
     void locatePresets();
     void shippedPresets_data();
     void shippedPresets();
+    void localPathRoundTrip_data();
+    void localPathRoundTrip();
+    void localPathRandomRoundTrip();
+    void localPathUrlsAndQuoting();
+    void shredNonUtf8Names_data();
+    void shredNonUtf8Names();
 };
 
 namespace {
@@ -605,6 +666,124 @@ void TestShredCore::shippedPresets()
     QCOMPARE(int(o.removeMode), mode);
     QCOMPARE(o.iterations, 3);
     QVERIFY(o.force && o.zero && o.verbose);
+}
+
+void TestShredCore::localPathRoundTrip_data()
+{
+    QTest::addColumn<QByteArray>("bytes");
+    QTest::addColumn<bool>("plain");
+    QTest::addColumn<QString>("display");
+    QTest::newRow("ascii") << QByteArray("/tmp/a b") << true << "/tmp/a b";
+    QTest::newRow("utf-8") << QByteArray("/tmp/na\xc3\xafve") << true << QString::fromUtf8("/tmp/naïve");
+    QTest::newRow("emoji") << QByteArray("\xf0\x9f\x98\x80") << true << QString::fromUtf8("\xf0\x9f\x98\x80");
+    QTest::newRow("latin-1 byte") << QByteArray("/tmp/caf\xe9") << false << "/tmp/caf\\xe9";
+    QTest::newRow("0xff") << QByteArray("\xff\xfe") << false << "\\xff\\xfe";
+    QTest::newRow("overlong") << QByteArray("\xc0\xaf") << false << "\\xc0\\xaf";
+    QTest::newRow("surrogate") << QByteArray("\xed\xa0\x80") << false << "\\xed\\xa0\\x80";
+    QTest::newRow("truncated") << QByteArray("a\xe2\x82") << false << "a\\xe2\\x82";
+    QTest::newRow("above U+10FFFF") << QByteArray("\xf4\x90\x80\x80") << false << "\\xf4\\x90\\x80\\x80";
+    // U+F780..U+F7FF are the escape characters themselves - stored escaped, so they survive too.
+    QTest::newRow("escape range") << QByteArray("\xef\x9e\x80") << false << "\\xef\\x9e\\x80";
+    QTest::newRow("empty") << QByteArray() << true << "";
+}
+
+void TestShredCore::localPathRoundTrip()
+{
+    QFETCH(QByteArray, bytes);
+    QFETCH(bool, plain);
+    QFETCH(QString, display);
+    const QString decoded = LocalPath::decode(bytes);
+    QCOMPARE(LocalPath::encode(decoded), bytes);
+    QCOMPARE(LocalPath::isPlain(decoded), plain);
+    QCOMPARE(LocalPath::display(decoded), display);
+    if (plain)
+        QCOMPARE(decoded, QString::fromUtf8(bytes));
+}
+
+void TestShredCore::localPathRandomRoundTrip()
+{
+    QRandomGenerator random(20261028);
+    for (int i = 0; i < 20000; ++i) {
+        QByteArray bytes(int(random.bounded(24)), '\0');
+        for (char &c : bytes)
+            c = char(random.bounded(i % 2 ? 256 : 64) + (i % 2 ? 0 : 0xC0)); // half biased to UTF-8 lead bytes
+        QCOMPARE(LocalPath::encode(LocalPath::decode(bytes)), bytes);
+    }
+}
+
+void TestShredCore::localPathUrlsAndQuoting()
+{
+    // file:// URLs (Dolphin, drag & drop, clipboard) keep the bytes - QUrl::toLocalFile() would not.
+    QCOMPARE(LocalPath::encode(LocalPath::fromFileUrl(QStringLiteral("file:///tmp/a%FFb%20c"))),
+             QByteArray("/tmp/a\xff" "b c"));
+    QCOMPARE(LocalPath::fromFileUrl(QStringLiteral("file:///tmp/na%C3%AF")), QString::fromUtf8("/tmp/naï"));
+
+    // The command line in the log uses bash's $'...' for such names, so it can be pasted into a shell.
+    QCOMPARE(shellQuote(LocalPath::decode("/tmp/a\xff'b\\c")), QStringLiteral("$'/tmp/a\\xff\\'b\\\\c'"));
+}
+
+void TestShredCore::shredNonUtf8Names_data()
+{
+    QTest::addColumn<QString>("program");
+    for (const char *program : {"shred", "gnushred"}) {
+        if (!QStandardPaths::findExecutable(QString::fromLatin1(program)).isEmpty())
+            QTest::newRow(program) << QString::fromLatin1(program);
+    }
+}
+
+void TestShredCore::shredNonUtf8Names()
+{
+    QFETCH(QString, program);
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QByteArray base = QFile::encodeName(tmp.path());
+    const QByteArray dir = base + "/dir\xff";
+    const QByteArray single = base + "/single\xfc";
+    const auto cleanup = qScopeGuard([&] { removeTree(dir); removeTree(single); });
+    QCOMPARE(::mkdir(dir.constData(), 0755), 0);
+    QCOMPARE(::mkdir((dir + "/sub\xfd").constData(), 0755), 0);
+    writeRaw(dir + "/f\xfe.txt", "secret");
+    writeRaw(dir + "/sub\xfd/g", "secret");
+    QCOMPARE(::symlink("/nonexistent", (dir + "/link\xfb").constData()), 0);
+    writeRaw(single, QByteArray(4096, 'A'));
+
+    const QString target = LocalPath::decode(dir);
+    QCOMPARE(ShredJob::targetType(target), ShredJob::TargetType::Directory);
+    const ShredJob::Plan plan = ShredJob::scan(target);
+    QVERIFY2(plan.error.isEmpty(), qPrintable(plan.error));
+    QCOMPARE(plan.target, target);
+    QCOMPARE(plan.files.size(), 2);
+    QCOMPARE(plan.others.size(), 1);
+    QCOMPARE(plan.dirs.size(), 2);
+    QVERIFY(plan.files.contains(LocalPath::decode(dir + "/f\xfe.txt")));
+
+    // A file overwritten in place: shred gets the exact bytes of the name.
+    ShredOptions keep;
+    keep.program = program;
+    keep.iterations = 1;
+    keep.zero = true;
+    keep.exact = true;
+    ShredJob overwrite(ShredJob::scan(LocalPath::decode(single)), keep);
+    QStringList log;
+    connect(&overwrite, &ShredJob::log, this, [&log](ShredJob::LogLevel, const QString &t) { log << t; });
+    QVERIFY(runJob(overwrite));
+    QVERIFY2(overwrite.summary().ok(), qPrintable(log.join('\n')));
+    QCOMPARE(readRaw(single), QByteArray(4096, '\0'));
+    // The command line in the log shows the name with \xNN.
+    QVERIFY2(log.first().contains(QStringLiteral("single\\xfc")), qPrintable(log.first()));
+
+    // A directory shredded and removed, including the names of its subdirectories.
+    ShredOptions remove = keep;
+    remove.removeMode = ShredOptions::RemoveMode::Wipe;
+    ShredJob job(plan, remove);
+    log.clear();
+    connect(&job, &ShredJob::log, this, [&log](ShredJob::LogLevel, const QString &t) { log << t; });
+    QVERIFY(runJob(job));
+    QVERIFY2(job.summary().ok(), qPrintable(log.join('\n')));
+    QCOMPARE(job.summary().filesShredded, 2);
+    QCOMPARE(job.summary().othersRemoved, 1);
+    QCOMPARE(job.summary().dirsRemoved, 2);
+    QVERIFY(!rawExists(dir));
 }
 
 QTEST_GUILESS_MAIN(TestShredCore)

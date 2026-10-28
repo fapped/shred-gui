@@ -11,6 +11,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 - **target list** (files and directories): add with buttons, type/paste a path
   (also `file://...`, quoted, with `~`), paste many paths from the clipboard (`Ctrl+V`,
   including files copied in Dolphin), drag & drop from a file manager, paths on the command line,
+- file names that are **not valid UTF-8** (e.g. Latin-1 names from old archives) are kept exactly
+  and passed to `shred` as bytes; the window and the log show such bytes as `\xNN`,
 - **directories are shredded recursively**: every file goes through `shred`, then the
   subdirectories are removed (deepest first) and finally the directory itself,
 - access to **all `shred` options**: `-n`, `-z`, `-f`, `-x`, `-v`, `-s`, `--random-source`,

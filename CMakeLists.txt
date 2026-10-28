@@ -14,6 +14,7 @@ include(GNUInstallDirs)
 
 # GUI-independent logic (options, scanning, running shred) - used by the application and the tests.
 add_library(shredcore STATIC
+    src/localpath.h src/localpath.cpp
     src/shredoptions.h src/shredoptions.cpp
     src/shredjob.h src/shredjob.cpp
 )

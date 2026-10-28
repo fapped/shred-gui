@@ -78,6 +78,7 @@ signals:
 private:
     void startNext();
     void startProcess(const QString &file);
+    void setRawArguments(QProcess *process, const QStringList &args) const;
     void onReadyRead();
     void onProcessFinished(int exitCode, QProcess::ExitStatus status);
     void onProcessError(QProcess::ProcessError error);

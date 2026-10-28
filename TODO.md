@@ -17,6 +17,9 @@
 - [x] Dolphin context menu (*Shred* submenu), installed by CMake
 - [x] Installed for the user into `~/.local` (2026-10-28); the older service menu removed
 
+- [x] File names that are not valid UTF-8: kept exactly (command line, URLs, drag & drop, clipboard),
+      passed to shred as bytes, shown with `\xNN`
+
 ## To do
 
 - [ ] Scan large directories in the background (scanning currently blocks the GUI), with cancellation
@@ -26,7 +29,8 @@
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] Warning about ineffectiveness on SSD / btrfs / ZFS (detect the target's file system type)
 - [ ] Warning about hard links (`st_nlink > 1`) in the list of files
-- [ ] File names that are not valid UTF-8 (the `QString` ↔ bytes conversion may change them)
+- [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
+      dialog or a custom one would be needed
 - [ ] Optional: running as root (pkexec) for files without permissions
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [ ] `.deb` package / AppImage, CI (GitHub Actions: build + tests)

@@ -1,12 +1,16 @@
 #include "shredjob.h"
+#include "localpath.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include <QTimer>
 
 #include <algorithm>
+#include <memory>
+#include <vector>
 
 #include <cerrno>
 #include <cstring>
@@ -30,7 +34,7 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
     if (!d) {
         const int err = errno;
         plan.error = QObject::tr("Cannot read directory \"%1\": %2")
-                         .arg(QFile::decodeName(dir), errnoString(err));
+                         .arg(LocalPath::display(LocalPath::decode(dir)), errnoString(err));
         return false;
     }
 
@@ -45,27 +49,27 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
         if (::lstat(path.constData(), &st) != 0) {
             const int err = errno;
             plan.error = QObject::tr("Cannot read \"%1\": %2")
-                             .arg(QFile::decodeName(path), errnoString(err));
+                             .arg(LocalPath::display(LocalPath::decode(path)), errnoString(err));
             ::closedir(d);
             return false;
         }
         if (S_ISDIR(st.st_mode)) {
             if (st.st_dev != rootDevice)
-                plan.skipped << QFile::decodeName(path);
+                plan.skipped << LocalPath::decode(path);
             else
                 subdirs << path;
         } else if (S_ISREG(st.st_mode)) {
-            plan.files << QFile::decodeName(path);
+            plan.files << LocalPath::decode(path);
         } else {
             // Symlinks are deliberately NOT passed to shred - it would destroy the file they point to.
-            plan.others << QFile::decodeName(path);
+            plan.others << LocalPath::decode(path);
         }
     }
     const int readErr = errno;
     ::closedir(d);
     if (readErr != 0) {
         plan.error = QObject::tr("Error reading directory \"%1\": %2")
-                         .arg(QFile::decodeName(dir), errnoString(readErr));
+                         .arg(LocalPath::display(LocalPath::decode(dir)), errnoString(readErr));
         return false;
     }
 
@@ -74,7 +78,7 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
         if (!scanDirectory(sub, rootDevice, plan))
             return false;
     }
-    plan.dirs << QFile::decodeName(dir);
+    plan.dirs << LocalPath::decode(dir);
     return true;
 }
 
@@ -126,7 +130,7 @@ ShredJob::TargetType ShredJob::targetType(const QString &path)
     if (path.isEmpty())
         return TargetType::Missing;
     struct stat st;
-    if (::lstat(QFile::encodeName(path).constData(), &st) != 0)
+    if (::lstat(LocalPath::encode(path).constData(), &st) != 0)
         return TargetType::Missing;
     if (S_ISLNK(st.st_mode))
         return TargetType::Symlink;
@@ -139,7 +143,7 @@ ShredJob::TargetType ShredJob::targetType(const QString &path)
 
 bool ShredJob::isProtectedPath(const QString &path)
 {
-    QString canonical = QFileInfo(path).canonicalFilePath();
+    QString canonical = LocalPath::canonical(path);
     if (canonical.isEmpty())
         canonical = QDir::cleanPath(path);
     static const QStringList systemDirs{
@@ -153,7 +157,7 @@ bool ShredJob::isProtectedPath(const QString &path)
     };
     if (systemDirs.contains(canonical))
         return true;
-    const QString home = QFileInfo(QDir::homePath()).canonicalFilePath();
+    const QString home = LocalPath::canonical(QDir::homePath());
     return !home.isEmpty() && canonical == home;
 }
 
@@ -165,11 +169,11 @@ ShredJob::Plan ShredJob::scan(const QString &target)
 
     switch (plan.type) {
     case TargetType::Missing:
-        plan.error = QObject::tr("Path \"%1\" does not exist.").arg(target);
+        plan.error = QObject::tr("Path \"%1\" does not exist.").arg(LocalPath::display(target));
         break;
     case TargetType::Symlink:
         plan.error = QObject::tr("\"%1\" is a symbolic link. Select the target file or directory directly.")
-                         .arg(plan.target);
+                         .arg(LocalPath::display(plan.target));
         break;
     case TargetType::File:
     case TargetType::Special:
@@ -178,14 +182,14 @@ ShredJob::Plan ShredJob::scan(const QString &target)
     case TargetType::Directory: {
         if (isProtectedPath(plan.target)) {
             plan.error = QObject::tr("Directory \"%1\" is protected (root, home or system directory).")
-                             .arg(plan.target);
+                             .arg(LocalPath::display(plan.target));
             break;
         }
-        const QByteArray root = QFile::encodeName(plan.target);
+        const QByteArray root = LocalPath::encode(plan.target);
         struct stat st;
         if (::lstat(root.constData(), &st) != 0) {
             const int err = errno;
-            plan.error = QObject::tr("Cannot read \"%1\": %2").arg(plan.target, errnoString(err));
+            plan.error = QObject::tr("Cannot read \"%1\": %2").arg(LocalPath::display(plan.target), errnoString(err));
             break;
         }
         scanDirectory(root, st.st_dev, plan);
@@ -201,10 +205,10 @@ QList<ShredJob::Plan> ShredJob::scanAll(const QStringList &targets, QStringList 
     QStringList canonicalPaths;
     for (const QString &target : targets) {
         Plan plan = scan(target);
-        const QString canonical = QFileInfo(plan.target).canonicalFilePath();
+        const QString canonical = LocalPath::canonical(plan.target);
         if (!canonical.isEmpty() && canonicalPaths.contains(canonical)) {
             if (notes)
-                *notes << tr("Duplicate target skipped: %1").arg(plan.target);
+                *notes << tr("Duplicate target skipped: %1").arg(LocalPath::display(plan.target));
             continue;
         }
         canonicalPaths << canonical;
@@ -225,7 +229,8 @@ QList<ShredJob::Plan> ShredJob::scanAll(const QStringList &targets, QStringList 
         if (outer.isEmpty())
             result << plans.at(i);
         else if (notes)
-            *notes << tr("%1 is inside %2 and will be processed as part of it.").arg(plans.at(i).target, outer);
+            *notes << tr("%1 is inside %2 and will be processed as part of it.")
+                          .arg(LocalPath::display(plans.at(i).target), LocalPath::display(outer));
     }
     return result;
 }
@@ -292,7 +297,7 @@ void ShredJob::startNext()
         if (!m_planAnnounced) {
             m_planAnnounced = true;
             if (m_plans.size() > 1)
-                emit log(LogLevel::Info, tr("--- Target %1/%2: %3 ---").arg(m_planIndex + 1).arg(m_plans.size()).arg(plan.target));
+                emit log(LogLevel::Info, tr("--- Target %1/%2: %3 ---").arg(m_planIndex + 1).arg(m_plans.size()).arg(LocalPath::display(plan.target)));
         }
         if (m_fileIndex < plan.files.size()) {
             startProcess(plan.files.at(m_fileIndex));
@@ -323,6 +328,7 @@ void ShredJob::startProcess(const QString &file)
     connect(m_process, &QProcess::readyRead, this, &ShredJob::onReadyRead);
     connect(m_process, &QProcess::finished, this, &ShredJob::onProcessFinished);
     connect(m_process, &QProcess::errorOccurred, this, &ShredJob::onProcessError);
+    setRawArguments(m_process, args);
     m_process->start(m_options.program, args);
 }
 
@@ -334,7 +340,8 @@ void ShredJob::onReadyRead()
     static const QRegularExpression passRe(QStringLiteral("(\\d+)/(\\d+)"));
     qsizetype nl;
     while ((nl = m_pending.indexOf('\n')) >= 0) {
-        const QString line = QString::fromLocal8Bit(m_pending.left(nl)).trimmed();
+        // shred prints the file name as it is - keep bytes that are not valid UTF-8 readable.
+        const QString line = LocalPath::display(LocalPath::decode(m_pending.left(nl))).trimmed();
         m_pending.remove(0, nl + 1);
         if (line.isEmpty())
             continue;
@@ -358,7 +365,7 @@ void ShredJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
         return;
     onReadyRead();
     if (!m_pending.trimmed().isEmpty())
-        emit log(LogLevel::Output, QString::fromLocal8Bit(m_pending).trimmed());
+        emit log(LogLevel::Output, LocalPath::display(LocalPath::decode(m_pending)).trimmed());
     m_pending.clear();
 
     if (status == QProcess::NormalExit && exitCode == 0) {
@@ -366,11 +373,12 @@ void ShredJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
     } else {
         ++m_summary.filesFailed;
         if (m_cancelRequested)
-            emit log(LogLevel::Warning, tr("Cancelled: %1 (the file may have been only partially overwritten)").arg(m_currentFile));
+            emit log(LogLevel::Warning, tr("Cancelled: %1 (the file may have been only partially overwritten)")
+                                          .arg(LocalPath::display(m_currentFile)));
         else if (status == QProcess::CrashExit)
-            emit log(LogLevel::Error, tr("shred crashed: %1").arg(m_currentFile));
+            emit log(LogLevel::Error, tr("shred crashed: %1").arg(LocalPath::display(m_currentFile)));
         else
-            emit log(LogLevel::Error, tr("Failed (exit code %1): %2").arg(exitCode).arg(m_currentFile));
+            emit log(LogLevel::Error, tr("Failed (exit code %1): %2").arg(exitCode).arg(LocalPath::display(m_currentFile)));
     }
 
     m_process->deleteLater();
@@ -398,41 +406,41 @@ void ShredJob::removeLeftovers(const Plan &plan)
         return;
     if (!m_options.removesFiles()) {
         emit log(LogLevel::Warning, tr("File removal is disabled - directory \"%1\" stays on disk.")
-                                        .arg(plan.target));
+                                        .arg(LocalPath::display(plan.target)));
         return;
     }
 
     for (const QString &path : std::as_const(plan.others)) {
-        if (::unlink(QFile::encodeName(path).constData()) == 0) {
+        if (::unlink(LocalPath::encode(path).constData()) == 0) {
             ++m_summary.othersRemoved;
-            emit log(LogLevel::Info, tr("Removed (not overwritten - symlink or special file): %1").arg(path));
+            emit log(LogLevel::Info, tr("Removed (not overwritten - symlink or special file): %1").arg(LocalPath::display(path)));
         } else {
             const int err = errno;
             ++m_summary.othersFailed;
-            emit log(LogLevel::Error, tr("Cannot remove \"%1\": %2").arg(path, errnoString(err)));
+            emit log(LogLevel::Error, tr("Cannot remove \"%1\": %2").arg(LocalPath::display(path), errnoString(err)));
         }
     }
 
     for (const QString &path : std::as_const(plan.skipped))
-        emit log(LogLevel::Warning, tr("Skipped mount point of another file system: %1").arg(path));
+        emit log(LogLevel::Warning, tr("Skipped mount point of another file system: %1").arg(LocalPath::display(path)));
 
     for (const QString &dir : std::as_const(plan.dirs)) {
-        QByteArray path = QFile::encodeName(dir);
+        QByteArray path = LocalPath::encode(dir);
         if (!isEmptyDirectory(path)) {
             ++m_summary.dirsFailed;
-            emit log(LogLevel::Error, tr("Directory is not empty or cannot be read - left in place: %1").arg(dir));
+            emit log(LogLevel::Error, tr("Directory is not empty or cannot be read - left in place: %1").arg(LocalPath::display(dir)));
             continue;
         }
         if (m_options.wipesNames())
             path = wipeName(path, m_options.syncsNames());
         if (::rmdir(path.constData()) == 0) {
             ++m_summary.dirsRemoved;
-            emit log(LogLevel::Info, tr("Removed directory: %1").arg(dir));
+            emit log(LogLevel::Info, tr("Removed directory: %1").arg(LocalPath::display(dir)));
         } else {
             const int err = errno;
             ++m_summary.dirsFailed;
             emit log(LogLevel::Error, tr("Cannot remove directory \"%1\" (%2): %3")
-                                          .arg(dir, QFile::decodeName(path), errnoString(err)));
+                                          .arg(LocalPath::display(dir), LocalPath::display(LocalPath::decode(path)), errnoString(err)));
         }
     }
 }
@@ -463,6 +471,30 @@ void ShredJob::finish()
     if (s.ok())
         emit progress(1000);
     emit finished();
+}
+
+void ShredJob::setRawArguments(QProcess *process, const QStringList &args) const
+{
+    // QProcess passes arguments as UTF-8, which would change file names that are not valid UTF-8
+    // (see LocalPath). For such arguments the child process execs shred itself with the exact bytes;
+    // if that fails, QProcess continues with its own exec, which then fails the same way.
+    if (std::all_of(args.cbegin(), args.cend(), [](const QString &arg) { return LocalPath::isPlain(arg); }))
+        return;
+    const QString program = m_options.program.contains(QLatin1Char('/'))
+        ? m_options.program
+        : QStandardPaths::findExecutable(m_options.program);
+    if (program.isEmpty())
+        return;
+    auto bytes = std::make_shared<std::vector<QByteArray>>();
+    bytes->push_back(LocalPath::encode(program));
+    for (const QString &arg : args)
+        bytes->push_back(LocalPath::encode(arg));
+    auto argv = std::make_shared<std::vector<char *>>();
+    for (QByteArray &arg : *bytes)
+        argv->push_back(arg.data()); // detached here, in the parent
+    argv->push_back(nullptr);
+    // Runs in the child after fork(); only async-signal-safe calls.
+    process->setChildProcessModifier([bytes, argv] { ::execv(argv->front(), argv->data()); });
 }
 
 void ShredJob::emitProgress(double currentFraction)
