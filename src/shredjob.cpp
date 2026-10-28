@@ -17,6 +17,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
@@ -170,8 +171,19 @@ bool ShredJob::isProtectedPath(const QString &path)
     };
     if (systemDirs.contains(canonical))
         return true;
-    const QString home = LocalPath::canonical(QDir::homePath());
-    return !home.isEmpty() && canonical == home;
+    QStringList homes{QDir::homePath()};
+    // Started with sudo, the home directory is /root - the home of the user who ran sudo is protected too.
+    const QByteArray sudoUser = qgetenv("SUDO_USER");
+    if (!sudoUser.isEmpty()) {
+        if (const passwd *pw = ::getpwnam(sudoUser.constData()); pw && pw->pw_dir)
+            homes << LocalPath::decode(pw->pw_dir);
+    }
+    for (const QString &home : std::as_const(homes)) {
+        const QString canonicalHome = LocalPath::canonical(home);
+        if (!canonicalHome.isEmpty() && canonical == canonicalHome)
+            return true;
+    }
+    return false;
 }
 
 ShredJob::Plan ShredJob::scan(const QString &target, ScanControl *control)

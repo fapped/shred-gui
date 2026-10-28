@@ -22,6 +22,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -302,6 +303,23 @@ void TestShredCore::scanRejectsSymlinkAndProtected()
     QVERIFY(!ShredJob::scan(QStringLiteral("/")).error.isEmpty());
     QVERIFY(!ShredJob::scan(QDir::homePath()).error.isEmpty());
     QVERIFY(!ShredJob::scan(QStringLiteral("/usr")).error.isEmpty());
+    // Under sudo, the home of the user who ran it (here: the current user, with HOME pointing elsewhere).
+    {
+        const QByteArray oldHome = qgetenv("HOME");
+        const QByteArray oldSudoUser = qgetenv("SUDO_USER");
+        const QString realHome = QDir::homePath();
+        const passwd *pw = ::getpwuid(::getuid());
+        QVERIFY(pw);
+        qputenv("HOME", QFile::encodeName(tmp.path()));
+        QVERIFY(!ShredJob::isProtectedPath(LocalPath::decode(pw->pw_dir)) || realHome == tmp.path());
+        qputenv("SUDO_USER", pw->pw_name);
+        QVERIFY(ShredJob::isProtectedPath(LocalPath::decode(pw->pw_dir)));
+        qputenv("HOME", oldHome);
+        if (oldSudoUser.isEmpty())
+            qunsetenv("SUDO_USER");
+        else
+            qputenv("SUDO_USER", oldSudoUser);
+    }
     QVERIFY(!ShredJob::scan(tmp.filePath(QStringLiteral("missing"))).error.isEmpty());
 }
 

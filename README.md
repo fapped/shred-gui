@@ -230,7 +230,8 @@ On other desktops or without a session bus this does nothing.
 ## Safeguards
 
 - A target that is a symbolic link is rejected — select the real path instead.
-- Recursive shredding of `/`, the home directory and the main system directories is refused.
+- Recursive shredding of `/`, the home directory and the main system directories is refused
+  (started with `sudo`, also the home directory of the user who ran it).
 - Mount points of other file systems inside a directory are skipped (and reported).
 - Files with other hard links are counted in the confirmation (and listed under *Show Details…*):
   their data is overwritten under all names, but `-u` removes only the selected name.
@@ -239,6 +240,12 @@ On other desktops or without a session bus this does nothing.
   (*Show Details…* lists the files):
 
 ![The confirmation before shredding](docs/screenshots/shred-gui-confirm.png)
+
+## Files without permissions
+
+The application does not ask for administrator rights itself. Files that belong to other users
+(or to root) are shredded by starting the tool with `sudo`, e.g. `sudo shred -n 3 -z -u -- file`
+in a terminal.
 
 ## Limitations of `shred`
 

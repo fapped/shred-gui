@@ -30,6 +30,8 @@
 - [x] Warnings about storage that does not overwrite in place (flash, copy-on-write, log-structured,
       network, overlay, FUSE) and about files with other hard links
 - [x] Scanning in the background with the number of entries and cancellation
+- [x] Files without permissions: no built-in elevation (pkexec) - the tool is started with sudo;
+      the home directory of `SUDO_USER` stays protected
 
 ## To do
 
@@ -37,6 +39,5 @@
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
       dialog or a custom one would be needed
-- [ ] Optional: running as root (pkexec) for files without permissions
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
