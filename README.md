@@ -71,7 +71,7 @@ Running (optionally with a list of paths, a preset or a settings file):
 
 Options loaded with `--preset` / `--config` (and from *File → Load preset*) apply **to the current
 session only** — they do not overwrite the remembered options. The title of the options section
-then shows "… (session only, not remembered)". Only *Import settings…* changes them permanently.
+then shows "… - session only, not remembered". Only *Import settings…* changes them permanently.
 
 Tests:
 
@@ -114,10 +114,15 @@ tools/make-screenshots.sh
 
 Installed into `<prefix>/share/shred-gui/presets/`:
 
-| Preset | Effect |
-|---|---|
-| `shred-delete` | 3 passes, `-f`, `-z`, `-v`, removal with `-u` (wipesync) |
-| `shred-overwrite` | 3 passes, `-f`, `-z`, `-v`, no removal |
+| Preset | Name | Effect |
+|---|---|---|
+| `shred-delete` | Shred and delete permanently (-n 3 -z -u) | 3 passes, `-f`, `-z`, `-v`, removal with `-u` (wipesync) |
+| `shred-overwrite` | Overwrite only, keep the file (-n 3 -z) | 3 passes, `-f`, `-z`, `-v`, no removal |
+
+A preset is shown under the same name everywhere — in *File → Load preset*, in the title of the
+options section and in the Dolphin menu: the `name` from its file followed by the options that
+decide what is destroyed (`-n`, `-z`, `-s`, the removal mode). The tooltip in *Load preset* shows
+the whole command and the file.
 
 Presets do not set the program — the one chosen by the user (`shred`/`gnushred`) is kept.
 They are searched for in this order: `~/.local/share/shred-gui/presets/`, the `$XDG_DATA_DIRS`
@@ -131,8 +136,8 @@ After installation Dolphin shows a **Shred** submenu:
 
 ![The Shred submenu in Dolphin](docs/screenshots/context-menu.png)
 
-- **Shred and delete permanently…** — files and directories (`--preset shred-delete`),
-- **Overwrite only (keep file)…** — files only (`--preset shred-overwrite`).
+- **Shred and delete permanently (-n 3 -z -u)…** — files and directories (`--preset shred-delete`),
+- **Overwrite only, keep the file (-n 3 -z)…** — files only (`--preset shred-overwrite`).
 
 Clicking an entry opens Shred GUI with the selected items in the list and the preset loaded —
 nothing happens automatically, you still have to click *Shred* and confirm. Several selected

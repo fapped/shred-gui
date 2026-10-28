@@ -69,6 +69,8 @@ if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     qt_add_executable(tst_shredcore tests/tst_shredcore.cpp)
     target_link_libraries(tst_shredcore PRIVATE shredcore Qt6::Test)
-    target_compile_definitions(tst_shredcore PRIVATE SHRED_GUI_SOURCE_PRESETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/presets")
+    target_compile_definitions(tst_shredcore PRIVATE
+        SHRED_GUI_SOURCE_PRESETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/presets"
+        SHRED_GUI_SOURCE_SERVICEMENUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/packaging/servicemenus")
     add_test(NAME tst_shredcore COMMAND tst_shredcore)
 endif()

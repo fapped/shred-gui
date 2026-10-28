@@ -1,7 +1,7 @@
 {
     "format": "shred-gui-settings",
     "version": 1,
-    "name": "Overwrite only (keep file)",
+    "name": "Overwrite only, keep the file",
     "options": {
         "iterations": 3,
         "force": true,

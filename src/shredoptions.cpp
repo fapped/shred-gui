@@ -118,6 +118,25 @@ QStringList ShredOptions::arguments(const QString &file) const
     return arguments() << QStringLiteral("--") << file;
 }
 
+QString ShredOptions::summaryFlags() const
+{
+    QStringList parts{QStringLiteral("-n %1").arg(iterations)};
+    if (zero)
+        parts << QStringLiteral("-z");
+    if (useSize)
+        parts << QStringLiteral("-s %1").arg(size.trimmed());
+    if (removeMode == RemoveMode::Default)
+        parts << QStringLiteral("-u");
+    else if (removeMode != RemoveMode::None)
+        parts << QStringLiteral("--remove=") + removeModeName(removeMode);
+    return parts.join(QLatin1Char(' '));
+}
+
+QString ShredOptions::label(const QString &name) const
+{
+    return QStringLiteral("%1 (%2)").arg(name, summaryFlags());
+}
+
 QString ShredOptions::validate() const
 {
     if (program.trimmed().isEmpty())
@@ -355,6 +374,23 @@ QMap<QString, QString> ShredOptions::availablePresets(const QStringList &searchP
         }
     }
     return presets;
+}
+
+QList<ShredPreset> ShredOptions::presets(const QStringList &searchPaths)
+{
+    QList<ShredPreset> list;
+    const QMap<QString, QString> files = availablePresets(searchPaths);
+    for (auto it = files.cbegin(); it != files.cend(); ++it) {
+        ShredPreset preset;
+        preset.id = it.key();
+        preset.file = it.value();
+        preset.options = loadFromFile(preset.file, &preset.error, ShredOptions(), &preset.name);
+        if (preset.name.isEmpty())
+            preset.name = preset.id;
+        preset.label = preset.error.isEmpty() ? preset.options.label(preset.name) : preset.name;
+        list << preset;
+    }
+    return list; // availablePresets() is ordered by the file names
 }
 
 bool ShredOptions::isValidSize(const QString &size)

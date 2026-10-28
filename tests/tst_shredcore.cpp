@@ -142,6 +142,8 @@ private slots:
     void shredNonUtf8Names_data();
     void shredNonUtf8Names();
     void processedBytes();
+    void summaryFlags();
+    void presetNamesMatchDolphinMenu();
 };
 
 namespace {
@@ -817,6 +819,63 @@ void TestShredCore::processedBytes()
     QVERIFY(!processed.isEmpty());
     QVERIFY(std::is_sorted(processed.cbegin(), processed.cend()));
     QCOMPARE(processed.last(), job.totalBytes());
+}
+
+void TestShredCore::summaryFlags()
+{
+    ShredOptions o;
+    QCOMPARE(o.summaryFlags(), QStringLiteral("-n 3"));
+    o.zero = true;
+    o.removeMode = ShredOptions::RemoveMode::Default;
+    QCOMPARE(o.label(QStringLiteral("Delete")), QStringLiteral("Delete (-n 3 -z -u)"));
+    o.iterations = 1;
+    o.useSize = true;
+    o.size = QStringLiteral(" 1M ");
+    o.removeMode = ShredOptions::RemoveMode::Wipe;
+    o.force = true; // -f, -v, -x and the random source do not decide what is destroyed
+    o.exact = true;
+    QCOMPARE(o.summaryFlags(), QStringLiteral("-n 1 -z -s 1M --remove=wipe"));
+}
+
+void TestShredCore::presetNamesMatchDolphinMenu()
+{
+    const QList<ShredPreset> presets = ShredOptions::presets({QStringLiteral(SHRED_GUI_SOURCE_PRESETS_DIR)});
+    QCOMPARE(presets.size(), 2);
+    for (const ShredPreset &preset : presets) {
+        QVERIFY2(preset.error.isEmpty(), qPrintable(preset.error));
+        QVERIFY2(preset.name != preset.id, qPrintable(preset.id)); // every shipped preset has a name
+    }
+
+    // Every Dolphin action is "<preset label>…" and runs that preset; every preset has an action.
+    // Dolphin shows the actions of the Shred submenu sorted by their ids, so the action ids must be
+    // in the same order as the preset ids (the order of File > Load preset).
+    // (QSettings cannot read .desktop files: ';' starts a comment there.)
+    QMap<QString, QPair<QString, QString>> actions; // id -> (Name, Exec)
+    const QDir dir(QStringLiteral(SHRED_GUI_SOURCE_SERVICEMENUS_DIR));
+    for (const QString &fileName : dir.entryList({QStringLiteral("*.desktop.in")}, QDir::Files)) {
+        QString group;
+        QHash<QString, QString> entries; // "group/key" -> value
+        const QStringList lines = QString::fromUtf8(readFile(dir.filePath(fileName))).split(QLatin1Char('\n'));
+        for (const QString &line : lines) {
+            if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']')))
+                group = line.mid(1, line.size() - 2);
+            else if (const qsizetype eq = line.indexOf(QLatin1Char('=')); eq > 0)
+                entries.insert(group + QLatin1Char('/') + line.left(eq), line.mid(eq + 1));
+        }
+        QCOMPARE(entries.value(QStringLiteral("Desktop Entry/X-KDE-Submenu")), QStringLiteral("Shred"));
+        const QStringList ids = entries.value(QStringLiteral("Desktop Entry/Actions")).split(QLatin1Char(';'), Qt::SkipEmptyParts);
+        for (const QString &id : ids) {
+            const QString prefix = QStringLiteral("Desktop Action ") + id + QLatin1Char('/');
+            actions.insert(id, {entries.value(prefix + QStringLiteral("Name")), entries.value(prefix + QStringLiteral("Exec"))});
+        }
+    }
+    QCOMPARE(actions.size(), presets.size());
+    qsizetype i = 0;
+    for (auto it = actions.cbegin(); it != actions.cend(); ++it, ++i) {
+        QCOMPARE(it.value().first, presets.at(i).label + QStringLiteral("…"));
+        QVERIFY2(it.value().second.contains(QStringLiteral("--preset ") + presets.at(i).id + QLatin1Char(' ')),
+                 qPrintable(it.value().second));
+    }
 }
 
 QTEST_GUILESS_MAIN(TestShredCore)

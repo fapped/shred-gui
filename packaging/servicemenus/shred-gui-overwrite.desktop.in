@@ -9,6 +9,6 @@ Icon=edit-delete-shred
 Actions=shredOverwrite;
 
 [Desktop Action shredOverwrite]
-Name=Overwrite only (keep file)…
+Name=Overwrite only, keep the file (-n 3 -z)…
 Icon=document-edit
 Exec=@SHRED_GUI_EXECUTABLE@ --preset shred-overwrite %U

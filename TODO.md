@@ -21,6 +21,8 @@
       passed to shred as bytes, shown with `\xNN`
 - [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6),
       with a cancel button, a speed graph and a summary at the end
+- [x] Consistent preset names: the same name (with the deciding flags, e.g. *-n 3 -z -u*) in
+      *Load preset*, the options title and the Dolphin menu
 
 ## To do
 

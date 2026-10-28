@@ -328,17 +328,24 @@ void MainWindow::buildMenus()
 void MainWindow::populatePresetMenu()
 {
     m_presetMenu->clear();
-    const QMap<QString, QString> presets = ShredOptions::availablePresets();
+    // The same names as in the Dolphin menu; the command and the file are in the tooltip.
+    const QList<ShredPreset> presets = ShredOptions::presets();
     if (presets.isEmpty()) {
         m_presetMenu->addAction(tr("No presets found"))->setEnabled(false);
         return;
     }
-    for (auto it = presets.cbegin(); it != presets.cend(); ++it) {
-        const QString file = it.value();
-        QAction *action = m_presetMenu->addAction(it.key(), this, [this, file] {
+    m_presetMenu->setToolTipsVisible(true);
+    for (const ShredPreset &preset : presets) {
+        const QString file = preset.file;
+        QAction *action = m_presetMenu->addAction(preset.label, this, [this, file] {
             importSettingsFile(file, Persistence::SessionOnly);
         });
-        action->setToolTip(file);
+        if (preset.error.isEmpty()) {
+            action->setToolTip(tr("%1\n%2").arg(commandLine(QStringLiteral("shred"), preset.options.arguments()), file));
+        } else {
+            action->setEnabled(false);
+            action->setToolTip(preset.error);
+        }
     }
     m_presetMenu->addSeparator();
     m_presetMenu->addAction(tr("Presets are used for this session only"))->setEnabled(false);
@@ -664,7 +671,7 @@ bool MainWindow::importSettingsFile(const QString &path, Persistence persistence
     } else {
         // Session only: the remembered options stay untouched until settings are imported explicitly.
         m_rememberOptions = false;
-        setOptionsSource(tr("%1 (session only, not remembered)").arg(name));
+        setOptionsSource(tr("%1 - session only, not remembered").arg(options.label(name)));
         appendLog(ShredJob::LogLevel::Info, tr("Loaded \"%1\" from %2 (session only)").arg(name, path));
     }
     // The validation message (e.g. a program missing on this machine) takes precedence in the status bar.

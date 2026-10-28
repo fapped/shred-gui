@@ -44,9 +44,9 @@ int main(int argc, char *argv[])
     parser.process(arguments);
 
     if (parser.isSet(listPresetsOption)) {
-        const QMap<QString, QString> presets = ShredOptions::availablePresets();
-        for (auto it = presets.cbegin(); it != presets.cend(); ++it)
-            std::printf("%s\t%s\n", qPrintable(it.key()), qPrintable(it.value()));
+        const QList<ShredPreset> presets = ShredOptions::presets();
+        for (const ShredPreset &preset : presets)
+            std::printf("%s\t%s\t%s\n", qPrintable(preset.id), qPrintable(preset.label), qPrintable(preset.file));
         if (presets.isEmpty()) {
             std::fprintf(stderr, "No presets found. Searched in:\n%s\n",
                          qPrintable(ShredOptions::presetSearchPaths().join(QLatin1Char('\n'))));

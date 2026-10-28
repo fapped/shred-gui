@@ -9,6 +9,6 @@ Icon=edit-delete-shred
 Actions=shredDelete;
 
 [Desktop Action shredDelete]
-Name=Shred and delete permanently…
+Name=Shred and delete permanently (-n 3 -z -u)…
 Icon=edit-delete-shred
 Exec=@SHRED_GUI_EXECUTABLE@ --preset shred-delete %U
