@@ -23,6 +23,7 @@
       with a cancel button, a speed graph and a summary at the end
 - [x] Consistent preset names: the same name (with the deciding flags, e.g. *-n 3 -z -u*) in
       *Load preset*, the options title and the Dolphin menu
+- [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 
 ## To do
 

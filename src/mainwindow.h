@@ -108,6 +108,7 @@ private:
     QLineEdit *m_previewEdit = nullptr;
     QPushButton *m_startButton = nullptr;
     QPushButton *m_cancelButton = nullptr;
+    QCheckBox *m_closeWhenFinishedCheck = nullptr;
     QProgressBar *m_progress = nullptr;
     QLabel *m_currentFile = nullptr;
     QPlainTextEdit *m_log = nullptr;

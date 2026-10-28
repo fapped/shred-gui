@@ -32,6 +32,7 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -238,7 +239,11 @@ void MainWindow::buildUi()
     m_startButton->setStyleSheet(QStringLiteral("QPushButton:enabled { color: white; background-color: #c62828; "
                                                 "font-weight: bold; padding: 4px 16px; }"));
     m_cancelButton = new QPushButton(QIcon::fromTheme(QStringLiteral("process-stop")), tr("Cancel"), central);
+    m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
+    m_closeWhenFinishedCheck->setToolTip(tr("Quit Shred GUI after everything was shredded successfully. After errors "
+                                            "or cancelling the window stays open."));
     runRow->addWidget(m_progress, 1);
+    runRow->addWidget(m_closeWhenFinishedCheck);
     runRow->addWidget(m_startButton);
     runRow->addWidget(m_cancelButton);
     mainLayout->addLayout(runRow);
@@ -291,6 +296,10 @@ void MainWindow::buildUi()
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::startShred);
     connect(m_cancelButton, &QPushButton::clicked, this, &MainWindow::cancelShred);
     connect(clearLog, &QPushButton::clicked, m_log, &QPlainTextEdit::clear);
+    // A window preference, not a shred option: remembered right away, also in a preset (session-only) window.
+    connect(m_closeWhenFinishedCheck, &QCheckBox::toggled, this, [](bool on) {
+        QSettings().setValue(QStringLiteral("window/closeWhenFinished"), on);
+    });
 
     const auto refresh = [this] {
         updatePreview();
@@ -358,6 +367,7 @@ void MainWindow::loadSettings()
     if (!settings.contains(QStringLiteral("options/program")) && m_programCombo->count() > 0)
         options.program = m_programCombo->itemText(0);
     applyOptions(options);
+    m_closeWhenFinishedCheck->setChecked(settings.value(QStringLiteral("window/closeWhenFinished"), false).toBool());
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
 }
 
@@ -956,7 +966,14 @@ void MainWindow::onJobFinished()
         m_desktopProgress->finish(true);
     else
         m_desktopProgress->finish(false, tr("Not everything could be shredded or removed."));
-    if (summary.ok()) {
+    if (summary.ok() && m_closeWhenFinishedCheck->isChecked()) {
+        // A short moment to see the result; unchecking the box in the meantime keeps the window open.
+        m_currentFile->setText(tr("Finished successfully. Closing..."));
+        QTimer::singleShot(1500, this, [this] {
+            if (m_closeWhenFinishedCheck->isChecked() && !(m_job && m_job->isRunning()))
+                close();
+        });
+    } else if (summary.ok()) {
         statusBar()->showMessage(tr("Finished successfully."), 10000);
     } else if (!summary.cancelled) {
         QMessageBox::warning(this, tr("Finished with errors"),

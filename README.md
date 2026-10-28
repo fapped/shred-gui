@@ -21,7 +21,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   (from the `-v` passes), log, cancellation,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (current file, speed, a cancel button, a summary at the end),
-- options are remembered between runs,
+- options are remembered between runs; *Close when finished* quits the application after
+  a fully successful run (after errors or cancelling the window stays open),
 - export/import of the configuration to/from JSON files (*File → Export/Import settings*,
   *Export… / Import…* buttons),
 - **presets** shipped with the application (`--preset`, *File → Load preset*) and integration
