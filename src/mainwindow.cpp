@@ -714,6 +714,10 @@ void MainWindow::showAbout()
     QMessageBox::about(this, tr("About Shred GUI"),
                        tr("<b>Shred GUI</b> %1<br><br>"
                           "A graphical front-end for the <code>shred</code> command.<br><br>"
+                          "<b>Created with AI:</b> the code, tests and documentation were written by "
+                          "Claude (Anthropic) in Claude Code, following the author's requirements, and "
+                          "checked with automated tests and by hand. Review the code before relying on it - "
+                          "shredding cannot be undone.<br><br>"
                           "Licensed under the MIT License.")
                            .arg(QApplication::applicationVersion()));
 }
