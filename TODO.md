@@ -32,11 +32,11 @@
 - [x] Scanning in the background with the number of entries and cancellation
 - [x] Files without permissions: no built-in elevation (pkexec) - the tool is started with sudo;
       the home directory of `SUDO_USER` stays protected
+- [x] Speed graph in the application window: behind the progress bar (time on the x axis, the scale in
+      the corner), `SpeedHistory` in the core library with tests
 
 ## To do
 
-- [ ] Later: the speed graph also in the application window, not only in the Plasma notification
-      (e.g. a live speed graph in place of the progress bar, with the progress shown over it)
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based

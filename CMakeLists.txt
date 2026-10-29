@@ -18,6 +18,7 @@ add_library(shredcore STATIC
     src/shredoptions.h src/shredoptions.cpp
     src/shredjob.h src/shredjob.cpp
     src/storagecheck.h src/storagecheck.cpp
+    src/speedhistory.h src/speedhistory.cpp
 )
 target_include_directories(shredcore PUBLIC src)
 target_link_libraries(shredcore PUBLIC Qt6::Core)
@@ -27,6 +28,7 @@ qt_add_executable(shred-gui
     src/main.cpp
     src/mainwindow.h src/mainwindow.cpp
     src/desktopprogress.h src/desktopprogress.cpp
+    src/speedgraph.h src/speedgraph.cpp
 )
 target_link_libraries(shred-gui PRIVATE shredcore Qt6::Widgets Qt6::DBus)
 

@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "desktopprogress.h"
 #include "localpath.h"
+#include "speedgraph.h"
 
 #include <QAction>
 #include <QApplication>
@@ -241,7 +242,7 @@ void MainWindow::buildUi()
 
     // --- Run ---
     auto *runRow = new QHBoxLayout;
-    m_progress = new QProgressBar(central);
+    m_progress = new SpeedGraph(central);
     m_progress->setRange(0, 1000);
     m_progress->setValue(0);
     m_progress->setFormat(QStringLiteral("%p%"));
@@ -999,6 +1000,10 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
     m_job = new ShredJob(std::move(plans), options, this);
     connect(m_job, &ShredJob::log, this, &MainWindow::appendLog);
     connect(m_job, &ShredJob::progress, m_progress, &QProgressBar::setValue);
+    connect(m_job, &ShredJob::processedBytesChanged, m_progress, [this](qint64 bytes, qint64 bytesPerSecond) {
+        if (bytes > 0) // the speed is measured once something has been written
+            m_progress->addSpeed(bytesPerSecond);
+    });
     connect(m_job, &ShredJob::currentFileChanged, this, [this](const QString &file) {
         m_currentFile->setText(file.isEmpty() ? QString() : tr("Current file: %1").arg(LocalPath::display(file)));
     });
@@ -1016,6 +1021,7 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
                            + (hardLinked.size() > 10 ? QStringLiteral(", ...") : QString())));
     }
     startDesktopProgress();
+    m_progress->start();
     m_job->start();
     updateControls();
 }
@@ -1103,6 +1109,7 @@ void MainWindow::appendLogLines(ShredJob::LogLevel level, const QString &text, b
 void MainWindow::onJobFinished()
 {
     const ShredJob::Summary summary = m_job->summary();
+    m_progress->stop();
     // Targets that no longer exist were shredded and removed - drop them from the list.
     for (int i = m_targetList->count() - 1; i >= 0; --i) {
         const QString path = m_targetList->item(i)->data(kPathRole).toString();

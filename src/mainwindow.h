@@ -20,8 +20,8 @@ class QListWidget;
 class QListWidgetItem;
 class QMenu;
 class QPlainTextEdit;
-class QProgressBar;
 class QPushButton;
+class SpeedGraph;
 class QSpinBox;
 class QThread;
 class QTimer;
@@ -120,7 +120,7 @@ private:
     QPushButton *m_startButton = nullptr;
     QPushButton *m_cancelButton = nullptr;
     QCheckBox *m_closeWhenFinishedCheck = nullptr;
-    QProgressBar *m_progress = nullptr;
+    SpeedGraph *m_progress = nullptr; // the progress bar with the speed graph
     QLabel *m_currentFile = nullptr;
     QPlainTextEdit *m_log = nullptr;
 

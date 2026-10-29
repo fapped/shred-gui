@@ -22,7 +22,7 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   FUSE file systems, and files with other **hard links**,
 - large directories are scanned in the background (the number of entries is shown, *Cancel* stops it),
 - preview of the generated command, confirmation dialog with the list of files, progress bar
-  (by the amount written), a log with the time of every line (the date in the line that starts a run
+  (by the amount written) with a live **speed graph** behind it, a log with the time of every line (the date in the line that starts a run
   and when the day changes), cancellation,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (current file, speed, a cancel button, a summary at the end),
@@ -205,6 +205,12 @@ Removing a directory requires removing its files — if "Do not remove" is selec
 application offers to enable `-u`.
 
 ![The log after shredding a directory and a file](docs/screenshots/shred-gui-finished.png)
+
+## Speed graph
+
+Behind the progress bar of the window there is a graph of the speed of writing (measured every 0.5 s,
+see below). The x axis is the time since the start (at least 10 seconds while running, the whole job
+after it ends), the top of the graph is the speed in its top left corner. The graph of the last job stays until the next one starts.
 
 ## Progress outside the window
 
