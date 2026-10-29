@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "desktopprogress.h"
 #include "filedialog.h"
+#include "filelisting.h"
 #include "localpath.h"
 #include "speedgraph.h"
 
@@ -23,6 +24,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QLocale>
+#include <QMap>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -517,8 +519,19 @@ void MainWindow::addTargets(const QStringList &paths)
 {
     QStringList existing = targets();
     int added = 0;
+    QList<QPair<QString, QStringList>> ambiguous;
     for (const QString &raw : paths) {
-        const QString path = normalizePath(raw);
+        QString path = normalizePath(raw);
+        // Dolphin passes names that are not valid UTF-8 with U+FFFD in place of the bytes.
+        if (!path.isEmpty() && !LocalPath::info(path).exists) {
+            const QStringList matches = FileListing::replacedBytesMatches(path);
+            if (matches.size() > 1) {
+                ambiguous.append({path, matches});
+                continue;
+            }
+            if (matches.size() == 1)
+                path = matches.first();
+        }
         if (path.isEmpty() || existing.contains(path))
             continue;
         auto *item = new QListWidgetItem(LocalPath::display(path), m_targetList);
@@ -532,6 +545,38 @@ void MainWindow::addTargets(const QStringList &paths)
     updatePathInfo();
     updatePreview();
     updateControls();
+    // Not from within a drop (the file manager would wait) or before the window is shown.
+    if (!ambiguous.isEmpty())
+        QTimer::singleShot(0, this, [this, ambiguous] { chooseReplacedBytesMatches(ambiguous); });
+}
+
+void MainWindow::chooseReplacedBytesMatches(const QList<QPair<QString, QStringList>> &paths)
+{
+    // One dialog per directory of the matches; nothing is chosen in advance.
+    QMap<QString, QPair<QStringList, QStringList>> byDir; // directory -> (names passed, matching names)
+    for (const auto &[path, matches] : paths) {
+        for (const QString &match : matches) {
+            const qsizetype slash = match.lastIndexOf(QLatin1Char('/'));
+            auto &[passed, names] = byDir[slash == 0 ? QStringLiteral("/") : match.left(slash)];
+            const QString name = LocalPath::display(path.mid(path.lastIndexOf(QLatin1Char('/')) + 1));
+            if (!passed.contains(name))
+                passed << name;
+            names << match.mid(slash + 1);
+        }
+    }
+    for (auto it = byDir.cbegin(); it != byDir.cend(); ++it) {
+        QStringList passed = it->first;
+        for (QString &name : passed)
+            name = QStringLiteral("<b>%1</b>").arg(name.toHtmlEscaped());
+        BuiltInFileDialog dialog(BuiltInFileDialog::FilesAndDirectories, tr("Choose the files that were meant"),
+                                 it.key(), this);
+        dialog.showOnly(it->second);
+        dialog.setNote(tr("The file manager passed %1, which does not exist: it replaces bytes that are not valid "
+                          "UTF-8 with %2. Several names here match - choose the ones that were meant.")
+                           .arg(passed.join(QStringLiteral(", ")), QString(QChar::ReplacementCharacter)));
+        if (dialog.exec() == QDialog::Accepted)
+            addTargets(dialog.selectedPaths());
+    }
 }
 
 QStringList MainWindow::targets() const

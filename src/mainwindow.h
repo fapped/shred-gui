@@ -91,6 +91,8 @@ private:
     void rememberRecentSettingsFile(const QString &file);
 
     static QString normalizePath(const QString &text);
+    // Paths with U+FFFD from a file manager that match several names: the user chooses in the built-in dialog.
+    void chooseReplacedBytesMatches(const QList<QPair<QString, QStringList>> &paths);
 
     QListWidget *m_targetList = nullptr;
     QLineEdit *m_pathEdit = nullptr;
