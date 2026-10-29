@@ -253,7 +253,7 @@ While shredding runs, its progress is also shown
   the application reads how much the running shred process has written (`wchar` in
   `/proc/<pid>/io`, a few microseconds per read); the speed is taken over the last 3 seconds, so it
   drops while shred syncs the data to the disk after each pass. When the job ends, the notification
-  shows a summary ("2,73 GiB written in 0:00:10", "Cancelled after …" or the error).
+  shows a summary ("12.00 GiB written in 0:00:45", "Cancelled after …" or the error).
 
 On other desktops or without a session bus this does nothing.
 
