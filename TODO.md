@@ -18,7 +18,7 @@
 - [x] Installed for the user into `~/.local` (2026-10-28); the older service menu removed
 
 - [x] File names that are not valid UTF-8: kept exactly (command line, URLs, drag & drop, clipboard),
-      passed to shred as bytes, shown with `\xNN`
+      passed to shred as bytes, shown with `\xNN` (but Dolphin itself converts such names, see To do)
 - [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6),
       with a cancel button, a speed graph and a summary at the end
 - [x] Consistent preset names: the same name (with the deciding flags, e.g. *-n 3 -z -u*) in
@@ -34,12 +34,17 @@
       the home directory of `SUDO_USER` stays protected
 - [x] Speed graph in the application window: behind the progress bar (time on the x axis, the scale in
       the corner), `SpeedHistory` in the core library with tests
+- [x] Built-in file dialog for names that are not valid UTF-8 (KDE's dialog shows them with U+FFFD and
+      then reports that the file does not exist): the ⋮ menu next to *Add directory…*, optionally for
+      all file dialogs of the sources; `FileListing` in the core library with tests
 
 ## To do
 
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
-- [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
-      dialog or a custom one would be needed
+- [ ] Dolphin (KIO) passes names that are not valid UTF-8 with U+FFFD in place of the bytes (context menu,
+      drag & drop, clipboard; checked with *Copy* in Dolphin: `caf%EF%BF%BD`). Such a path that does not exist
+      could be matched against the directory listing: one match - the exact name, several - choose in the
+      built-in dialog
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)

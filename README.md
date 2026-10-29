@@ -12,7 +12,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   (also `file://...`, quoted, with `~`), paste many paths from the clipboard (`Ctrl+V`,
   including files copied in Dolphin), drag & drop from a file manager, paths on the command line,
 - file names that are **not valid UTF-8** (e.g. Latin-1 names from old archives) are kept exactly
-  and passed to `shred` as bytes; the window and the log show such bytes as `\xNN`,
+  and passed to `shred` as bytes; the window and the log show such bytes as `\xNN`; a **built-in
+  file dialog** can choose such names (the system dialog cannot),
 - **directories are shredded recursively**: every file goes through `shred`, then the
   subdirectories are removed (deepest first) and finally the directory itself,
 - access to **all `shred` options**: `-n`, `-z`, `-f`, `-x`, `-v`, `-s`, `--random-source`,
@@ -205,6 +206,26 @@ Removing a directory requires removing its files — if "Do not remove" is selec
 application offers to enable `-u`.
 
 ![The log after shredding a directory and a file](docs/screenshots/shred-gui-finished.png)
+
+## File names that are not valid UTF-8
+
+Linux file names are bytes, and old files (e.g. from Windows/Latin-1 times or broken archives) may
+contain bytes that are not valid UTF-8. Shred GUI keeps such names exactly — from the command line,
+`file://` URLs with the bytes (`caf%E9`), drag & drop, the clipboard and the built-in file dialog —
+and passes the exact bytes to `shred`. They are shown with `\xNN` escapes (e.g. `caf\xe9`).
+
+The system file dialog cannot choose such names: KDE's dialog shows them with `�` and then reports
+that the file does not exist. The **⋮** button next to *Add directory…* opens the **built-in file
+dialog** instead, which lists the directories itself. It shows such names with `\xNN` badges and,
+for a selected one, how it reads as Latin-1 (e.g. `caf\xe9.jpg` → *café.jpg*), which helps to tell
+apart names like `caf\xe9` and `caf\xe8`. *Always use the built-in dialog* in the same menu makes it
+the dialog of *Add files…* and *Add directory…*; its *System dialog…*
+button opens the system dialog for one time.
+
+Dolphin converts such names too (KIO replaces the bytes): what it passes from the context menu,
+drag & drop and *Copy* holds `�` (U+FFFD) instead, e.g. `caf%EF%BF%BD.jpg` for both `caf\xe9.jpg` and
+`caf\xe8.jpg` — a name that does not exist. Choose such files in the built-in dialog. A directory with
+a plain name can be added from Dolphin as usual, whatever names it contains.
 
 ## Speed graph
 
