@@ -2,8 +2,8 @@
 # Regenerates the README screenshots in docs/screenshots/ (shred-gui-*.png).
 # Runs the real application offscreen in the Breeze style (nothing appears on the screen, no Plasma
 # notifications) with demo files in /tmp/shred-gui-demo - which are really shredded - and a temporary
-# configuration, so the remembered options and presets of the user are neither shown nor changed. The Dolphin menu screenshot
-# (context-menu.png) is taken by hand.
+# configuration, so the remembered options and presets of the user are neither shown nor changed. The Dolphin menu screenshots
+# (context-menu-*.png) are taken by hand.
 set -euo pipefail
 # The times in the log and the dialog do not depend on the time zone of the machine.
 export TZ=UTC

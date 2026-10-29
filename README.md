@@ -139,9 +139,12 @@ you can also add your own presets (any `*.json` name, format as below).
 
 ## Dolphin context menu
 
-After installation Dolphin shows a **Shred** submenu:
+After installation Dolphin shows a **Shred** submenu (left: a file, right: a directory):
 
-![The Shred submenu in Dolphin](docs/screenshots/context-menu.png)
+<p>
+<img src="docs/screenshots/context-menu-file.png" width="49%" alt="The Shred submenu in Dolphin for a file: two entries">
+<img src="docs/screenshots/context-menu-dir.png" width="49%" alt="The Shred submenu in Dolphin for a directory: one entry">
+</p>
 
 - **Shred and delete permanently (-n 3 -z -u)…** — files and directories (`--preset shred-delete`),
 - **Overwrite only, keep the file (-n 3 -z)…** — files only (`--preset shred-overwrite`).
