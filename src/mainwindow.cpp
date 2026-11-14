@@ -257,47 +257,6 @@ void MainWindow::buildUi()
     form->addRow(QString(), settingsRow);
     mainLayout->addWidget(m_optionsBox);
 
-    // --- Command preview ---
-    auto *previewRow = new QHBoxLayout;
-    m_previewEdit = new QLineEdit(central);
-    m_previewEdit->setReadOnly(true);
-    m_previewEdit->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    previewRow->addWidget(new QLabel(tr("Command:"), central));
-    previewRow->addWidget(m_previewEdit, 1);
-    mainLayout->addLayout(previewRow);
-
-    // --- Run ---
-    auto *runRow = new QHBoxLayout;
-    m_progress = new SpeedGraph(central);
-    m_progress->setRange(0, 1000);
-    m_progress->setValue(0);
-    m_progress->setFormat(QStringLiteral("%p%"));
-    m_startButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")), tr("Shred"), central);
-    m_startButton->setStyleSheet(QStringLiteral("QPushButton:enabled { color: white; background-color: #c62828; "
-                                                "font-weight: bold; padding: 4px 16px; }"));
-    m_cancelButton = new QPushButton(QIcon::fromTheme(QStringLiteral("process-stop")), tr("Cancel"), central);
-    m_quitButton = new QPushButton(QIcon::fromTheme(QStringLiteral("application-exit")), tr("Quit"), central);
-    m_quitButton->setToolTip(tr("Close Shred GUI (while shredding, asks first whether to cancel it)."));
-    m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
-    m_closeWhenFinishedCheck->setToolTip(tr("Quit Shred GUI after everything was shredded successfully. After errors "
-                                            "or cancelling the window stays open."));
-    runRow->addWidget(m_progress, 1);
-    runRow->addWidget(m_closeWhenFinishedCheck);
-    runRow->addWidget(m_startButton);
-    runRow->addWidget(m_cancelButton);
-    runRow->addWidget(m_quitButton);
-    mainLayout->addLayout(runRow);
-
-    m_currentFile = new ElidedLabel(central);
-    m_currentFile->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    mainLayout->addWidget(m_currentFile);
-    m_scanTimer = new QTimer(this);
-    m_scanTimer->setInterval(200);
-    connect(m_scanTimer, &QTimer::timeout, this, [this] {
-        if (m_scanControl)
-            m_currentFile->setText(tr("Scanning... %L1 entries").arg(m_scanControl->entries.load()));
-    });
-
     // --- Log ---
     auto *logBox = new QGroupBox(tr("Log"), central);
     auto *logLayout = new QVBoxLayout(logBox);
@@ -333,6 +292,54 @@ void MainWindow::buildUi()
     logLayout->addWidget(m_log, 1);
     logLayout->addLayout(logButtons);
     mainLayout->addWidget(logBox, 1);
+
+    // --- Command preview ---
+    auto *previewRow = new QHBoxLayout;
+    m_previewEdit = new QLineEdit(central);
+    m_previewEdit->setReadOnly(true);
+    m_previewEdit->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    previewRow->addWidget(new QLabel(tr("Command:"), central));
+    previewRow->addWidget(m_previewEdit, 1);
+    mainLayout->addLayout(previewRow);
+
+    // --- Run ---
+    auto *runRow = new QHBoxLayout;
+    m_progress = new SpeedGraph(central);
+    m_progress->setRange(0, 1000);
+    m_progress->setValue(0);
+    m_progress->setFormat(QStringLiteral("%p%"));
+    m_startButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")), tr("Shred"), central);
+    m_startButton->setStyleSheet(QStringLiteral("QPushButton:enabled { color: white; background-color: #c62828; "
+                                                "font-weight: bold; padding: 4px 16px; }"));
+    m_cancelButton = new QPushButton(QIcon::fromTheme(QStringLiteral("process-stop")), tr("Cancel"), central);
+    m_quitButton = new QPushButton(QIcon::fromTheme(QStringLiteral("application-exit")), tr("Quit"), central);
+    m_quitButton->setToolTip(tr("Close Shred GUI (while shredding, asks first whether to cancel it)."));
+    m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
+    m_closeWhenFinishedCheck->setToolTip(tr("Quit Shred GUI after everything was shredded successfully. After errors "
+                                            "or cancelling the window stays open."));
+    runRow->addWidget(m_progress, 1);
+    runRow->addWidget(m_closeWhenFinishedCheck);
+    runRow->addWidget(m_startButton);
+    runRow->addWidget(m_cancelButton);
+    runRow->addWidget(m_quitButton);
+    mainLayout->addLayout(runRow);
+
+    m_currentFile = new ElidedLabel(central);
+    m_currentFile->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_fileCount = new QLabel(this);
+    m_fileCount->setToolTip(tr("Files processed (shredded or failed) of all files to shred, and how many are left."));
+    mainLayout->addWidget(m_currentFile);
+    // The status bar: the result of the last run on the left (hidden while a message is shown there, e.g. an
+    // invalid option), the file counter on the right.
+    m_resultLabel = new QLabel(this);
+    statusBar()->addWidget(m_resultLabel, 1);
+    statusBar()->addPermanentWidget(m_fileCount);
+    m_scanTimer = new QTimer(this);
+    m_scanTimer->setInterval(200);
+    connect(m_scanTimer, &QTimer::timeout, this, [this] {
+        if (m_scanControl)
+            m_currentFile->setText(tr("Scanning... %L1 entries").arg(m_scanControl->entries.load()));
+    });
 
     setCentralWidget(central);
     resize(840, 960);
@@ -943,8 +950,10 @@ void MainWindow::startShred()
         m_progress->setValue(0);
         m_currentFile->clear();
         updateControls();
-        if (control->cancelled)
+        if (control->cancelled) {
             appendLog(ShredJob::LogLevel::Warning, tr("Scanning cancelled."));
+            m_resultLabel->setText(tr("Scanning cancelled."));
+        }
         else
             confirmAndStart(result->plans, result->notes);
     });
@@ -952,6 +961,8 @@ void MainWindow::startShred()
     m_scanThread = thread;
     m_progress->setRange(0, 0); // busy indicator
     m_currentFile->setText(tr("Scanning..."));
+    m_fileCount->clear();
+    m_resultLabel->clear();
     m_scanTimer->start();
     thread->start();
     updateControls();
@@ -1141,6 +1152,9 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
     connect(m_job, &ShredJob::currentFileChanged, this, [this](const QString &file) {
         m_currentFile->setText(file.isEmpty() ? QString() : tr("Current file: "), LocalPath::display(file));
     });
+    connect(m_job, &ShredJob::filesChanged, this, [this](qsizetype done, qsizetype total) {
+        m_fileCount->setText(tr("Files: %L1 / %L2 (%L3 left)").arg(done).arg(total).arg(total - done));
+    });
     connect(m_job, &ShredJob::finished, this, &MainWindow::onJobFinished);
 
     QString logFileError;
@@ -1276,14 +1290,17 @@ void MainWindow::onJobFinished()
         m_desktopProgress->finish(false, tr("Not everything could be shredded or removed."));
     if (summary.ok() && m_closeWhenFinishedCheck->isChecked()) {
         // A short moment to see the result; unchecking the box in the meantime keeps the window open.
-        m_currentFile->setText(tr("Finished successfully. Closing..."));
+        m_resultLabel->setText(tr("Finished successfully. Closing..."));
         QTimer::singleShot(1500, this, [this] {
             if (m_closeWhenFinishedCheck->isChecked() && !isBusy())
                 close();
         });
     } else if (summary.ok()) {
-        statusBar()->showMessage(tr("Finished successfully."), 10000);
-    } else if (!summary.cancelled) {
+        m_resultLabel->setText(tr("Finished successfully."));
+    } else if (summary.cancelled) {
+        m_resultLabel->setText(tr("Cancelled."));
+    } else {
+        m_resultLabel->setText(tr("Finished with errors."));
         QMessageBox::warning(this, tr("Finished with errors"),
                              tr("Not everything could be shredded or removed. See the log for details."));
     }

@@ -320,6 +320,7 @@ ShredJob::ShredJob(QList<Plan> plans, ShredOptions options, QObject *parent)
     const int passes = m_options.iterations + (m_options.zero ? 1 : 0);
     for (const Plan &plan : std::as_const(m_plans)) {
         m_totalSteps += plan.files.size() + 1;
+        m_totalFiles += plan.files.size();
         for (const qint64 size : plan.fileSizes)
             m_totalBytes += size * passes;
     }
@@ -366,6 +367,7 @@ void ShredJob::start()
     m_planIndex = 0;
     m_fileIndex = 0;
     m_doneSteps = 0;
+    m_doneFiles = 0;
     m_doneBytes = 0;
     m_fileFraction = 0.0;
     m_rateSamples.clear();
@@ -375,6 +377,7 @@ void ShredJob::start()
     m_summary = {};
     m_cancelRequested = false;
     emit progress(0);
+    emit filesChanged(0, m_totalFiles);
     startNext();
 }
 
@@ -497,6 +500,8 @@ void ShredJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
     m_doneBytes += currentFileBytes();
     ++m_fileIndex;
     ++m_doneSteps;
+    ++m_doneFiles;
+    emit filesChanged(m_doneFiles, m_totalFiles);
     m_fileFraction = 0.0;
     emitProgress(0.0);
     startNext();

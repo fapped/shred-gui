@@ -23,7 +23,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   FUSE file systems, and files with other **hard links**,
 - large directories are scanned in the background (the number of entries is shown, *Cancel* stops it),
 - preview of the generated command, confirmation dialog with the list of files, progress bar
-  (by the amount written) with a live **speed graph** behind it, a log with the time of every line (the date in the line that starts a run
+  (by the amount written) with a live **speed graph** behind it, the result of the last run and a
+  **file counter** (files done of all files and how many are left) in the status bar, a log with the time of every line (the date in the line that starts a run
   and when the day changes), cancellation,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (current file, speed, a cancel button, a summary at the end),

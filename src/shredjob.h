@@ -92,6 +92,9 @@ public:
     const QList<Plan> &plans() const { return m_plans; }
     // The amount shred writes: the size of all files times the number of passes (an estimate with -s).
     qint64 totalBytes() const { return m_totalBytes; }
+    // The number of regular files to shred (of all targets) and how many of them are done (shredded or failed).
+    qsizetype totalFiles() const { return m_totalFiles; }
+    qsizetype doneFiles() const { return m_doneFiles; }
 
     // The number of bytes the process has written so far (the "wchar" line of /proc/<pid>/io), -1 if unknown.
     static qint64 writtenBytes(qint64 pid);
@@ -103,6 +106,8 @@ signals:
     // The amount written of totalBytes() and the current speed (over the last few seconds).
     void processedBytesChanged(qint64 bytes, qint64 bytesPerSecond);
     void currentFileChanged(const QString &path);
+    // Emitted at the start and after each file.
+    void filesChanged(qsizetype done, qsizetype total);
     void finished();
 
 private:
@@ -130,6 +135,8 @@ private:
     qsizetype m_doneSteps = 0;
     qsizetype m_totalSteps = 0;
     qint64 m_totalBytes = 0;
+    qsizetype m_totalFiles = 0;
+    qsizetype m_doneFiles = 0;
     qint64 m_doneBytes = 0; // written for the finished files
     double m_fileFraction = 0.0; // of the current file, never decreasing
     // shred reports only the start of each pass, so the amount written by the running process is read

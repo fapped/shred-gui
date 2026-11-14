@@ -128,6 +128,8 @@ private:
     QCheckBox *m_closeWhenFinishedCheck = nullptr;
     SpeedGraph *m_progress = nullptr; // the progress bar with the speed graph
     ElidedLabel *m_currentFile = nullptr;
+    QLabel *m_fileCount = nullptr;   // in the status bar
+    QLabel *m_resultLabel = nullptr; // the result of the last run, in the status bar
     QPlainTextEdit *m_log = nullptr;
     QCheckBox *m_logToFileCheck = nullptr; // ShredOptions::logToFile
     RunLog m_runLog; // open while a run with logToFile goes on

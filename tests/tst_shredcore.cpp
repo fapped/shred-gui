@@ -651,11 +651,18 @@ void TestShredCore::shredMultipleTargets()
     ShredJob job(ShredJob::scanAll({first, dir, second}), options);
     QList<int> progress;
     connect(&job, &ShredJob::progress, this, [&progress](int value) { progress << value; });
+    QList<QPair<qsizetype, qsizetype>> files;
+    connect(&job, &ShredJob::filesChanged, this, [&files](qsizetype done, qsizetype total) { files << qMakePair(done, total); });
     QStringList log;
     connect(&job, &ShredJob::log, this, [&log](ShredJob::LogLevel, const QString &t) { log << t; });
+    QCOMPARE(job.totalFiles(), 4);
     QVERIFY(runJob(job));
     QVERIFY2(job.summary().ok(), qPrintable(log.join('\n')));
     QCOMPARE(job.summary().filesShredded, 4);
+    // Counted over all targets: 0/4 at the start, then once per file.
+    const QList<QPair<qsizetype, qsizetype>> expectedFiles{{0, 4}, {1, 4}, {2, 4}, {3, 4}, {4, 4}};
+    QCOMPARE(files, expectedFiles);
+    QCOMPARE(job.doneFiles(), 4);
     QCOMPARE(job.summary().dirsRemoved, 2);
     QVERIFY(QDir(tmp.path()).isEmpty(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot));
 
