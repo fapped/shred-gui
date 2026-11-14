@@ -12,6 +12,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDesktopServices>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -311,8 +312,24 @@ void MainWindow::buildUi()
                                     "The log names the shredded files - the file keeps their names after the "
                                     "files are gone.")
                                      .arg(RunLog::defaultDirectory(QStringLiteral("shred-gui"))));
+    // The directory of the log files next to the checkbox - a link that opens it in the file manager.
+    const QString logDirectory = RunLog::defaultDirectory(QStringLiteral("shred-gui"));
+    auto *logDirectoryLabel = new QLabel(QStringLiteral("<a href=\"%1\">%2</a>")
+                                             .arg(QUrl::fromLocalFile(logDirectory).toString().toHtmlEscaped(),
+                                                  RunLog::displayDirectory(logDirectory).toHtmlEscaped()),
+                                         m_logToFileCheck->parentWidget());
+    logDirectoryLabel->setTextFormat(Qt::RichText);
+    logDirectoryLabel->setToolTip(tr("Open the directory of the log files (created if it does not exist yet)."));
+    connect(logDirectoryLabel, &QLabel::linkActivated, this, [this, logDirectory] {
+        if (!RunLog::makeDirectory(logDirectory) || !QDesktopServices::openUrl(QUrl::fromLocalFile(logDirectory)))
+            appendLog(ShredJob::LogLevel::Warning, tr("Cannot open %1").arg(logDirectory));
+    });
+    // Greyed out while the log is not saved.
+    logDirectoryLabel->setEnabled(m_logToFileCheck->isChecked());
+    connect(m_logToFileCheck, &QCheckBox::toggled, logDirectoryLabel, &QWidget::setEnabled);
     auto *logButtons = new QHBoxLayout;
     logButtons->addWidget(m_logToFileCheck);
+    logButtons->addWidget(logDirectoryLabel);
     logButtons->addStretch(1);
     logButtons->addWidget(clearLog);
     logLayout->addWidget(m_log, 1);
@@ -1135,7 +1152,7 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
         appendLog(ShredJob::LogLevel::Warning, note);
     appendLogLines(ShredJob::LogLevel::Info, tr("=== Start: %1 target(s) ===").arg(m_job->plans().size()), true);
     if (m_runLog.isOpen())
-        appendLog(ShredJob::LogLevel::Info, tr("Log file: %1").arg(m_runLog.path()));
+        appendLog(ShredJob::LogLevel::Info, tr("Log file: %1").arg(RunLog::displayDirectory(m_runLog.path())));
     else if (options.logToFile)
         appendLog(ShredJob::LogLevel::Warning, tr("The log is not saved: %1").arg(logFileError));
     if (!unwritable.isEmpty()) {

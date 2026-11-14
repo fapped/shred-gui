@@ -1097,6 +1097,12 @@ void TestShredCore::runLogFiles()
     QVERIFY(ShredOptions::fromJson(QJsonObject{{"iterations", 1}}, &error, base).logToFile);
 
     QVERIFY(RunLog::defaultDirectory(QStringLiteral("shred-gui")).endsWith(QStringLiteral("/shred-gui/logs")));
+    // Shown next to the checkbox with the home directory as "~".
+    const QString home = QDir::homePath();
+    QCOMPARE(RunLog::displayDirectory(home + QStringLiteral("/.local/state/app/logs")), QStringLiteral("~/.local/state/app/logs"));
+    QCOMPARE(RunLog::displayDirectory(home), QStringLiteral("~"));
+    QCOMPARE(RunLog::displayDirectory(home + QStringLiteral("x/logs")), home + QStringLiteral("x/logs"));
+    QCOMPARE(RunLog::displayDirectory(QStringLiteral("/var/log")), QStringLiteral("/var/log"));
 }
 
 void TestShredCore::scanFindsHardLinks()
