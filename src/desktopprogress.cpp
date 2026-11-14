@@ -80,8 +80,10 @@ void DesktopProgress::start(const QString &title, const QString &target, const Q
         {QStringLiteral("descriptionValue2"), amount},
         {QStringLiteral("percent"), 0u},
     };
+    // The task manager entry waits for the reply to requestView(): with a job view Plasma shows the jobs
+    // on the task manager itself, without one this instance does.
+    m_ownLauncherEntry = false;
     broadcast(true);
-    publishLauncherEntry(true);
     m_heartbeatTimer.start();
 
     QDBusConnection bus = QDBusConnection::sessionBus();
@@ -97,11 +99,17 @@ void DesktopProgress::start(const QString &title, const QString &target, const Q
         m_requestPending = false;
         const QDBusPendingReply<QDBusObjectPath> reply = *call;
         if (reply.isError() || !m_active) {
-            // No job view server (not Plasma) - the task manager progress still works.
-            if (m_finishPending)
+            // No job view server (not Plasma) - the task manager progress is shown by this instance.
+            if (m_finishPending) {
                 m_active = false;
+            } else if (m_active) {
+                m_ownLauncherEntry = true;
+                publishLauncherEntry(true);
+            }
             return;
         }
+        // Plasma forwards the progress of the jobs to the task manager itself (the average of the
+        // application's jobs, with their count) - a second value from here would fight with it.
         // The job views live on the connection that owns the server name (the reply's sender is not
         // available here), so the well-known name is used for them too.
         m_jobService = kJobServer;
@@ -276,6 +284,8 @@ void DesktopProgress::broadcast(bool running)
 
 void DesktopProgress::publishLauncherEntry(bool includeSelf)
 {
+    if (!m_ownLauncherEntry)
+        return;
     const qint64 now = m_clock.elapsed();
     m_combined.expire(now);
     if (includeSelf)

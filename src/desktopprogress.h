@@ -10,10 +10,12 @@
 #include <QVariantMap>
 
 // Shows the progress of shredding outside the window, over D-Bus:
-// - on the task manager entry (com.canonical.Unity.LauncherEntry, supported by Plasma and others),
-//   combined with the other running instances: the task manager keeps one progress per application,
-//   so the instances share theirs over D-Bus and all of them show the same, combined value there,
-// - as a job in the notification area (org.kde.JobViewServerV2, Plasma), with a cancel button.
+// - as a job in the notification area (org.kde.JobViewServerV2, Plasma), with a cancel button;
+//   Plasma also shows the jobs on the task manager entry (the average of all jobs of the application),
+// - without a job view server (other desktops): on the task manager entry
+//   (com.canonical.Unity.LauncherEntry), combined with the other running instances - the task manager
+//   keeps one progress per application, so the instances share theirs over D-Bus and all of them show
+//   the same, combined value there.
 // Without these services (other desktops, no session bus) everything is a no-op.
 class DesktopProgress : public QObject
 {
@@ -74,6 +76,7 @@ private:
     bool m_progressChanged = false;
     bool m_active = false;
     bool m_requestPending = false; // requestView() has not returned yet
+    bool m_ownLauncherEntry = false; // no job view server - this instance sends the task manager progress
     bool m_finishPending = false; // finish() was called before the job view was created
     uint m_finishCode = 0;
     QString m_finishMessage;
