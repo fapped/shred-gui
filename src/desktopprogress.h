@@ -1,5 +1,8 @@
 #pragma once
 
+#include "combinedprogress.h"
+
+#include <QDBusMessage>
 #include <QElapsedTimer>
 #include <QObject>
 #include <QString>
@@ -8,6 +11,8 @@
 
 // Shows the progress of shredding outside the window, over D-Bus:
 // - on the task manager entry (com.canonical.Unity.LauncherEntry, supported by Plasma and others),
+//   combined with the other running instances: the task manager keeps one progress per application,
+//   so the instances share theirs over D-Bus and all of them show the same, combined value there,
 // - as a job in the notification area (org.kde.JobViewServerV2, Plasma), with a cancel button.
 // Without these services (other desktops, no session bus) everything is a no-op.
 class DesktopProgress : public QObject
@@ -36,11 +41,19 @@ signals:
 
 private slots:
     void onCancelRequested();
+    void onPeerUpdate(const QDBusMessage &message);
 
 private:
     void scheduleUpdate();
     void flush();
     void sendLauncherEntry(double progress, bool visible);
+    // Tells the other instances about this one's progress (`running` false: this one has ended).
+    void broadcast(bool running);
+    // Shows the combined progress of this instance (if `includeSelf`) and the other running ones
+    // on the task manager entry, hidden when none is running.
+    void publishLauncherEntry(bool includeSelf);
+    void heartbeat();
+    void endSharing(); // this instance stops contributing to the combined progress
     void terminateJob(uint errorCode, const QString &errorMessage, bool blocking);
     void sendUpdate(const QVariantMap &properties);
 
@@ -52,6 +65,12 @@ private:
     QElapsedTimer m_elapsed; // Plasma's "Average Speed" is processedBytes / elapsedTime
     double m_progress = 0.0;
     qint64 m_processedBytes = 0; // the last amount sent, for the summary line at the end
+    qint64 m_totalBytes = 0; // the weight of this job in the combined progress
+    CombinedProgress m_combined; // this instance ("") and the other running ones (by D-Bus name)
+    QElapsedTimer m_clock; // monotonic time for m_combined
+    // Repeats this instance's progress while it runs: keeps it from expiring in the other instances
+    // when nothing changes for a while, and drops the instances that stopped reporting.
+    QTimer m_heartbeatTimer;
     bool m_progressChanged = false;
     bool m_active = false;
     bool m_requestPending = false; // requestView() has not returned yet

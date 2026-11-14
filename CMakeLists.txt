@@ -20,6 +20,7 @@ add_library(shredcore STATIC
     src/storagecheck.h src/storagecheck.cpp
     src/speedhistory.h src/speedhistory.cpp
     src/filelisting.h src/filelisting.cpp
+    src/combinedprogress.h src/combinedprogress.cpp
 )
 target_include_directories(shredcore PUBLIC src)
 target_link_libraries(shredcore PUBLIC Qt6::Core)

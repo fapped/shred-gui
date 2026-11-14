@@ -1,3 +1,4 @@
+#include "combinedprogress.h"
 #include "filelisting.h"
 #include "localpath.h"
 #include "shredjob.h"
@@ -157,6 +158,8 @@ private slots:
     void scanFindsHardLinks();
     void scanFindsUnwritableDirs();
     void scanCanBeCancelled();
+    void combinedProgressWeightsBySize();
+    void combinedProgressExpires();
     void speedHistoryAverages();
     void speedHistoryGaps();
     void speedHistoryMergesBuckets();
@@ -1121,6 +1124,50 @@ void TestShredCore::scanCanBeCancelled()
     QVERIFY(ShredJob::scanAll({root}, nullptr, &control).isEmpty());
     const ShredJob::Plan plan = ShredJob::scan(root, &control);
     QVERIFY(!plan.error.isEmpty());
+}
+
+void TestShredCore::combinedProgressWeightsBySize()
+{
+    CombinedProgress combined;
+    QVERIFY(combined.isEmpty());
+    QCOMPARE(combined.value(), 0.0);
+
+    // A large job at 2% and a small one at 60%: the bytes written of all bytes to write.
+    combined.set(QString(), 0.02, 100'000, 0);
+    combined.set(QStringLiteral(":1.42"), 0.60, 1'000, 0);
+    QVERIFY(qAbs(combined.value() - (0.02 * 100'000 + 0.60 * 1'000) / 101'000) < 1e-12);
+
+    // Updating an instance replaces its entry; the end of the small job leaves the large one alone.
+    combined.set(QStringLiteral(":1.42"), 1.0, 1'000, 10);
+    QCOMPARE(combined.size(), 2);
+    combined.remove(QStringLiteral(":1.42"));
+    QCOMPARE(combined.value(), 0.02);
+
+    // Out-of-range values are clamped; a job without bytes still counts.
+    combined.set(QString(), 1.5, 0, 20);
+    QCOMPARE(combined.value(), 1.0);
+    combined.set(QString(), std::numeric_limits<double>::quiet_NaN(), 0, 20);
+    QCOMPARE(combined.value(), 0.0);
+
+    // Byte counts of several terabytes do not overflow.
+    CombinedProgress large;
+    large.set(QStringLiteral("a"), 0.5, std::numeric_limits<qint64>::max() / 2, 0);
+    large.set(QStringLiteral("b"), 0.5, std::numeric_limits<qint64>::max() / 2, 0);
+    QVERIFY(qAbs(large.value() - 0.5) < 1e-9);
+}
+
+void TestShredCore::combinedProgressExpires()
+{
+    CombinedProgress combined;
+    combined.set(QStringLiteral("crashed"), 0.3, 10, 0);
+    combined.set(QStringLiteral("alive"), 0.7, 10, 0);
+    QVERIFY(!combined.expire(CombinedProgress::StaleMs));
+    combined.set(QStringLiteral("alive"), 0.8, 10, CombinedProgress::StaleMs);
+    QVERIFY(combined.expire(CombinedProgress::StaleMs + 1));
+    QVERIFY(!combined.contains(QStringLiteral("crashed")));
+    QCOMPARE(combined.value(), 0.8);
+    QVERIFY(combined.expire(2 * CombinedProgress::StaleMs + 1));
+    QVERIFY(combined.isEmpty());
 }
 
 void TestShredCore::speedHistoryAverages()

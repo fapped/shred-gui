@@ -17,6 +17,11 @@ const QString kJobServer = QStringLiteral("org.kde.JobViewServer");
 const QString kJobServerPath = QStringLiteral("/JobViewServer");
 const QString kJobServerInterface = QStringLiteral("org.kde.JobViewServerV2");
 const QString kJobInterface = QStringLiteral("org.kde.JobViewV3");
+// The progress shared between running instances: Update(double progress, int64 totalBytes, bool running).
+const QString kPeerPath = QStringLiteral("/shred_gui/progress");
+const QString kPeerInterface = QStringLiteral("io.github.fapped.ShredGui.Progress");
+const QString kPeerSignal = QStringLiteral("Update");
+const QString kSelf; // this instance in m_combined
 
 // KJob capabilities and error codes, as understood by the job view server.
 constexpr int kCapabilityKillable = 0x0001;
@@ -25,6 +30,7 @@ constexpr uint kErrorKilled = 1;
 constexpr uint kErrorUserDefined = 100;
 
 constexpr int kUpdateIntervalMs = 250;
+constexpr int kHeartbeatIntervalMs = 1000; // well below CombinedProgress::StaleMs
 
 } // namespace
 
@@ -35,12 +41,18 @@ DesktopProgress::DesktopProgress(QObject *parent)
     m_updateTimer.setSingleShot(true);
     m_updateTimer.setInterval(kUpdateIntervalMs);
     connect(&m_updateTimer, &QTimer::timeout, this, &DesktopProgress::flush);
+    m_heartbeatTimer.setInterval(kHeartbeatIntervalMs);
+    connect(&m_heartbeatTimer, &QTimer::timeout, this, &DesktopProgress::heartbeat);
+    m_clock.start();
+    // From the start, also while idle: a job started later counts the ones already running.
+    QDBusConnection::sessionBus().connect(QString(), kPeerPath, kPeerInterface, kPeerSignal, this,
+                                          SLOT(onPeerUpdate(QDBusMessage)));
 }
 
 DesktopProgress::~DesktopProgress()
 {
     if (m_active) {
-        sendLauncherEntry(0.0, false);
+        endSharing();
         // Blocking: the application may be quitting, an asynchronous call would be lost.
         terminateJob(kErrorKilled, QString(), true);
     }
@@ -57,6 +69,7 @@ void DesktopProgress::start(const QString &title, const QString &target, const Q
     m_jobPath.clear();
     m_progress = 0.0;
     m_processedBytes = 0;
+    m_totalBytes = 0;
     m_progressChanged = true;
     m_elapsed.start();
     m_pending = {
@@ -67,7 +80,9 @@ void DesktopProgress::start(const QString &title, const QString &target, const Q
         {QStringLiteral("descriptionValue2"), amount},
         {QStringLiteral("percent"), 0u},
     };
-    sendLauncherEntry(0.0, true);
+    broadcast(true);
+    publishLauncherEntry(true);
+    m_heartbeatTimer.start();
 
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
@@ -150,6 +165,8 @@ void DesktopProgress::setTotalBytes(qint64 totalBytes)
 {
     if (!m_active || totalBytes <= 0)
         return;
+    m_totalBytes = totalBytes;
+    m_progressChanged = true;
     m_pending.insert(QStringLiteral("totalBytes"), qulonglong(totalBytes));
     scheduleUpdate();
 }
@@ -161,7 +178,7 @@ void DesktopProgress::finish(bool cancelled, const QString &errorMessage)
     m_updateTimer.stop();
     m_pending.clear();
     m_progressChanged = false;
-    sendLauncherEntry(m_progress, false);
+    endSharing();
     const uint code = cancelled ? kErrorKilled : errorMessage.isEmpty() ? kErrorNone : kErrorUserDefined;
 
     // The finished notification keeps the last info line - replace the progress (the current file)
@@ -204,7 +221,8 @@ void DesktopProgress::flush()
     if (!m_active)
         return;
     if (m_progressChanged) {
-        sendLauncherEntry(m_progress, true);
+        broadcast(true);
+        publishLauncherEntry(true);
         m_progressChanged = false;
     }
     if (m_jobPath.isEmpty() || m_pending.isEmpty())
@@ -247,4 +265,56 @@ void DesktopProgress::terminateJob(uint errorCode, const QString &errorMessage, 
     QDBusConnection::sessionBus().disconnect(m_jobService, m_jobPath, kJobInterface, QStringLiteral("cancelRequested"),
                                              this, SLOT(onCancelRequested()));
     m_jobPath.clear();
+}
+
+void DesktopProgress::broadcast(bool running)
+{
+    QDBusMessage signal = QDBusMessage::createSignal(kPeerPath, kPeerInterface, kPeerSignal);
+    signal << m_progress << qlonglong(m_totalBytes) << running;
+    QDBusConnection::sessionBus().send(signal);
+}
+
+void DesktopProgress::publishLauncherEntry(bool includeSelf)
+{
+    const qint64 now = m_clock.elapsed();
+    m_combined.expire(now);
+    if (includeSelf)
+        m_combined.set(kSelf, m_progress, m_totalBytes, now);
+    else
+        m_combined.remove(kSelf);
+    sendLauncherEntry(m_combined.value(), !m_combined.isEmpty());
+}
+
+void DesktopProgress::heartbeat()
+{
+    // Unlike a change of the progress, sent while the job view is being created or ending too.
+    if (!m_active || m_finishPending) {
+        m_heartbeatTimer.stop();
+        return;
+    }
+    broadcast(true);
+    publishLauncherEntry(true);
+}
+
+void DesktopProgress::endSharing()
+{
+    m_heartbeatTimer.stop();
+    broadcast(false);
+    // The task manager entry stays with the progress of the other instances, if any still run.
+    publishLauncherEntry(false);
+}
+
+void DesktopProgress::onPeerUpdate(const QDBusMessage &message)
+{
+    const QDBusConnection bus = QDBusConnection::sessionBus();
+    if (message.service() == bus.baseService()) // this instance's own signal
+        return;
+    const QList<QVariant> args = message.arguments();
+    if (args.size() < 3)
+        return;
+    if (args.at(2).toBool())
+        m_combined.set(message.service(), args.at(0).toDouble(), args.at(1).toLongLong(), m_clock.elapsed());
+    else
+        m_combined.remove(message.service());
+    // The sender updates the task manager entry itself (with this instance counted); nothing to send here.
 }
