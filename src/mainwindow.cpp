@@ -966,6 +966,43 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
         options = currentOptions();
     }
 
+    // shred -u overwrites first and removes afterwards - in a directory without write access the files
+    // would end up overwritten but not removed. Ask before anything is written.
+    if (options.removesFiles()) {
+        QStringList unwritable;
+        for (const ShredJob::Plan &plan : std::as_const(plans)) {
+            for (const QString &dir : plan.unwritableDirs)
+                unwritable << LocalPath::display(dir);
+        }
+        if (!unwritable.isEmpty()) {
+            QMessageBox box(QMessageBox::Warning, tr("Directories without write access"),
+                            tr("<b>%n director(y/ies) cannot be written to</b> (missing write permission, a read-only "
+                               "mount, or the read-only attribute on NTFS/FAT).<br><br>"
+                               "Files there would be <b>overwritten but not removed</b> - their names and sizes stay, "
+                               "and the directories cannot be removed.<br><br>"
+                               "Make the directories writable first, e.g.:<br>"
+                               "<code>find &lt;directory&gt; -type d -exec chmod u+w {} +</code>",
+                               nullptr, int(unwritable.size())),
+                            QMessageBox::NoButton, this);
+            box.setTextFormat(Qt::RichText);
+            QString details = unwritable.mid(0, kMaxListedPaths).join(QLatin1Char('\n'));
+            if (unwritable.size() > kMaxListedPaths)
+                details += tr("\n... and %1 more").arg(unwritable.size() - kMaxListedPaths);
+            box.setDetailedText(details);
+            QPushButton *proceed = box.addButton(tr("Overwrite anyway"), QMessageBox::DestructiveRole);
+            QPushButton *abort = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+            box.setDefaultButton(abort);
+            box.exec();
+            if (box.clickedButton() != proceed)
+                return;
+            appendLog(ShredJob::LogLevel::Warning,
+                      tr("%n director(y/ies) without write access - files there will not be removed: %1", nullptr,
+                         int(unwritable.size()))
+                          .arg(unwritable.mid(0, 10).join(QStringLiteral(", "))
+                               + (unwritable.size() > 10 ? QStringLiteral(", ...") : QString())));
+        }
+    }
+
     qsizetype files = 0;
     qsizetype others = 0;
     qsizetype dirs = 0;

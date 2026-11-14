@@ -155,6 +155,7 @@ private slots:
     void storageWarnings();
     void inspectRealPaths();
     void scanFindsHardLinks();
+    void scanFindsUnwritableDirs();
     void scanCanBeCancelled();
     void speedHistoryAverages();
     void speedHistoryGaps();
@@ -1067,6 +1068,38 @@ void TestShredCore::scanFindsHardLinks()
 
     QCOMPARE(ShredJob::scan(outsideName).hardLinked, QStringList{outsideName});
     QVERIFY(ShredJob::scan(root + QStringLiteral("/single")).hardLinked.isEmpty());
+}
+
+void TestShredCore::scanFindsUnwritableDirs()
+{
+    if (::geteuid() == 0)
+        QSKIP("root ignores directory permissions");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString root = tmp.filePath(QStringLiteral("target"));
+    const QString locked = root + QStringLiteral("/locked");
+    const QString emptyLocked = root + QStringLiteral("/empty-locked");
+    QVERIFY(QDir().mkpath(locked));
+    QVERIFY(QDir().mkpath(emptyLocked));
+    QVERIFY(QDir().mkpath(root + QStringLiteral("/open")));
+    writeFile(locked + QStringLiteral("/file"), "1");
+    writeFile(root + QStringLiteral("/open/file"), "2");
+    const auto setMode = [](const QString &path, mode_t mode) {
+        return ::chmod(QFile::encodeName(path).constData(), mode) == 0;
+    };
+    QVERIFY(setMode(locked, 0555));
+    QVERIFY(setMode(emptyLocked, 0555)); // empty - removed through its (writable) parent
+    const auto restore = qScopeGuard([&] { setMode(locked, 0755); setMode(emptyLocked, 0755); setMode(root, 0755); });
+
+    ShredJob::Plan plan = ShredJob::scan(root);
+    QVERIFY2(plan.error.isEmpty(), qPrintable(plan.error));
+    QCOMPARE(plan.unwritableDirs, QStringList{locked});
+
+    // A file in a locked directory, and a target whose parent is locked.
+    QCOMPARE(ShredJob::scan(locked + QStringLiteral("/file")).unwritableDirs, QStringList{locked});
+    QVERIFY(ShredJob::scan(root + QStringLiteral("/open/file")).unwritableDirs.isEmpty());
+    QVERIFY(setMode(root, 0555));
+    QVERIFY(ShredJob::scan(root + QStringLiteral("/open")).unwritableDirs.contains(root));
 }
 
 void TestShredCore::scanCanBeCancelled()

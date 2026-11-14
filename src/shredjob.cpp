@@ -31,6 +31,19 @@ QString errnoString(int err)
 
 // Recursively collects the content of a directory without following symlinks
 // and without crossing into other file systems.
+// Whether entries of the directory can be renamed and removed (write and search permission,
+// a file system mounted read-write).
+bool canModifyDirectory(const QByteArray &dir)
+{
+    return ::access(dir.constData(), W_OK | X_OK) == 0;
+}
+
+QByteArray parentDirectory(const QByteArray &path)
+{
+    const qsizetype slash = path.lastIndexOf('/');
+    return slash > 0 ? path.left(slash) : QByteArray("/");
+}
+
 bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan, ShredJob::ScanControl *control)
 {
     DIR *d = ::opendir(dir.constData());
@@ -42,11 +55,13 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
     }
 
     QList<QByteArray> subdirs;
+    bool hasEntries = false;
     errno = 0;
     while (dirent *entry = ::readdir(d)) {
         const char *name = entry->d_name;
         if (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0)
             continue;
+        hasEntries = true;
         if (control) {
             if (control->cancelled) {
                 plan.error = QObject::tr("Scanning cancelled.");
@@ -86,6 +101,9 @@ bool scanDirectory(const QByteArray &dir, dev_t rootDevice, ShredJob::Plan &plan
                          .arg(LocalPath::display(LocalPath::decode(dir)), errnoString(readErr));
         return false;
     }
+    // Removing the entries needs write access to this directory (an empty one is removed through its parent).
+    if (hasEntries && !canModifyDirectory(dir))
+        plan.unwritableDirs << LocalPath::decode(dir);
 
     std::sort(subdirs.begin(), subdirs.end());
     for (const QByteArray &sub : std::as_const(subdirs)) {
@@ -217,6 +235,10 @@ ShredJob::Plan ShredJob::scan(const QString &target, ScanControl *control)
                                                                                       ::minor(st.st_rdev)));
         else if (plan.type == TargetType::File)
             plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspect(plan.target));
+        if (plan.type == TargetType::File) {
+            if (const QByteArray parent = parentDirectory(LocalPath::encode(plan.target)); !canModifyDirectory(parent))
+                plan.unwritableDirs << LocalPath::decode(parent);
+        }
         break;
     }
     case TargetType::Directory: {
@@ -232,8 +254,12 @@ ShredJob::Plan ShredJob::scan(const QString &target, ScanControl *control)
             plan.error = QObject::tr("Cannot read \"%1\": %2").arg(LocalPath::display(plan.target), errnoString(err));
             break;
         }
-        if (scanDirectory(root, st.st_dev, plan, control))
+        if (scanDirectory(root, st.st_dev, plan, control)) {
             plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspect(plan.target));
+            // The target itself is removed from its parent directory.
+            if (const QByteArray parent = parentDirectory(root); !canModifyDirectory(parent))
+                plan.unwritableDirs << LocalPath::decode(parent);
+        }
         break;
     }
     }

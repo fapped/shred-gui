@@ -38,6 +38,10 @@ public:
         QStringList skipped; // mount points of other file systems - skipped
         QStringList hardLinked; // files of `files` with other hard links (names elsewhere)
         QStringList storageWarnings; // where overwriting in place does not reach the old data (see StorageCheck)
+        // Directories in which entries have to be removed or renamed but which this process cannot write to
+        // (e.g. folders with the read-only attribute on NTFS) - shred -u would overwrite the files there
+        // and then fail to remove them.
+        QStringList unwritableDirs;
         QString error;       // non-empty if the target cannot be processed
 
         bool isDirectory() const { return type == TargetType::Directory; }
