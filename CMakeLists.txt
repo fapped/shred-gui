@@ -32,6 +32,7 @@ qt_add_executable(shred-gui
     src/desktopprogress.h src/desktopprogress.cpp
     src/speedgraph.h src/speedgraph.cpp
     src/filedialog.h src/filedialog.cpp
+    src/elidedlabel.h src/elidedlabel.cpp
 )
 target_link_libraries(shred-gui PRIVATE shredcore Qt6::Widgets Qt6::DBus)
 

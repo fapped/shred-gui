@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "desktopprogress.h"
+#include "elidedlabel.h"
 #include "filedialog.h"
 #include "filelisting.h"
 #include "localpath.h"
@@ -283,7 +284,7 @@ void MainWindow::buildUi()
     runRow->addWidget(m_cancelButton);
     mainLayout->addLayout(runRow);
 
-    m_currentFile = new QLabel(central);
+    m_currentFile = new ElidedLabel(central);
     m_currentFile->setTextInteractionFlags(Qt::TextSelectableByMouse);
     mainLayout->addWidget(m_currentFile);
     m_scanTimer = new QTimer(this);
@@ -1111,7 +1112,7 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
             m_progress->addSpeed(bytesPerSecond);
     });
     connect(m_job, &ShredJob::currentFileChanged, this, [this](const QString &file) {
-        m_currentFile->setText(file.isEmpty() ? QString() : tr("Current file: %1").arg(LocalPath::display(file)));
+        m_currentFile->setText(file.isEmpty() ? QString() : tr("Current file: "), LocalPath::display(file));
     });
     connect(m_job, &ShredJob::finished, this, &MainWindow::onJobFinished);
 
