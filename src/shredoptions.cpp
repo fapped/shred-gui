@@ -175,6 +175,7 @@ void ShredOptions::save(QSettings &settings) const
     settings.setValue(QStringLiteral("useRandomSource"), useRandomSource);
     settings.setValue(QStringLiteral("randomSource"), randomSource);
     settings.setValue(QStringLiteral("removeMode"), static_cast<int>(removeMode));
+    settings.setValue(QStringLiteral("logToFile"), logToFile);
     settings.endGroup();
 }
 
@@ -192,6 +193,7 @@ ShredOptions ShredOptions::load(QSettings &settings)
     o.size = settings.value(QStringLiteral("size"), o.size).toString();
     o.useRandomSource = settings.value(QStringLiteral("useRandomSource"), o.useRandomSource).toBool();
     o.randomSource = settings.value(QStringLiteral("randomSource"), o.randomSource).toString();
+    o.logToFile = settings.value(QStringLiteral("logToFile"), o.logToFile).toBool();
     const int mode = settings.value(QStringLiteral("removeMode"), static_cast<int>(o.removeMode)).toInt();
     if (mode >= static_cast<int>(RemoveMode::None) && mode <= static_cast<int>(RemoveMode::WipeSync))
         o.removeMode = static_cast<RemoveMode>(mode);
@@ -213,6 +215,7 @@ QJsonObject ShredOptions::toJson() const
         {QStringLiteral("useRandomSource"), useRandomSource},
         {QStringLiteral("randomSource"), randomSource},
         {QStringLiteral("removeMode"), removeModeName(removeMode)},
+        {QStringLiteral("logToFile"), logToFile},
     };
 }
 
@@ -234,7 +237,8 @@ ShredOptions ShredOptions::fromJson(const QJsonObject &json, QString *error, con
         && readBool(json, "useSize", &o.useSize, error)
         && readString(json, "size", &o.size, error)
         && readBool(json, "useRandomSource", &o.useRandomSource, error)
-        && readString(json, "randomSource", &o.randomSource, error);
+        && readString(json, "randomSource", &o.randomSource, error)
+        && readBool(json, "logToFile", &o.logToFile, error);
     if (!ok)
         return {};
 
@@ -425,7 +429,7 @@ bool ShredOptions::operator==(const ShredOptions &other) const
     return program == other.program && iterations == other.iterations && force == other.force
         && verbose == other.verbose && exact == other.exact && zero == other.zero && useSize == other.useSize
         && size == other.size && useRandomSource == other.useRandomSource && randomSource == other.randomSource
-        && removeMode == other.removeMode;
+        && removeMode == other.removeMode && logToFile == other.logToFile;
 }
 
 QString shellQuote(const QString &arg)

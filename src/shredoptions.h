@@ -33,6 +33,9 @@ struct ShredOptions
     bool useRandomSource = false; // --random-source
     QString randomSource;
     RemoveMode removeMode = RemoveMode::None;
+    // Not a shred option: the log of each run is also written to a file (see RunLog). Off by default -
+    // the log names the shredded files, and the file would keep the names after the files are gone.
+    bool logToFile = false;
 
     bool removesFiles() const { return removeMode != RemoveMode::None; }
     // Whether directory names should be obfuscated (renamed to zeros) before removal, like shred does.

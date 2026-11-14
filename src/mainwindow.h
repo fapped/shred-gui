@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runlog.h"
 #include "shredjob.h"
 #include "shredoptions.h"
 
@@ -123,10 +124,13 @@ private:
     QLineEdit *m_previewEdit = nullptr;
     QPushButton *m_startButton = nullptr;
     QPushButton *m_cancelButton = nullptr;
+    QPushButton *m_quitButton = nullptr;
     QCheckBox *m_closeWhenFinishedCheck = nullptr;
     SpeedGraph *m_progress = nullptr; // the progress bar with the speed graph
     ElidedLabel *m_currentFile = nullptr;
     QPlainTextEdit *m_log = nullptr;
+    QCheckBox *m_logToFileCheck = nullptr; // ShredOptions::logToFile
+    RunLog m_runLog; // open while a run with logToFile goes on
 
     QPointer<ShredJob> m_job;
     // The scan before the confirmation runs in a thread (large directories take a while).

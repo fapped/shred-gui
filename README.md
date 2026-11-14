@@ -28,7 +28,12 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (current file, speed, a cancel button, a summary at the end),
 - options are remembered between runs; *Close when finished* quits the application after
-  a fully successful run (after errors or cancelling the window stays open),
+  a fully successful run (after errors or cancelling the window stays open); *Quit* closes the
+  window (while shredding it asks first whether to cancel),
+- optional **log files**: *Save the log to a file* (under the log; off by default) writes the log of
+  every run to `~/.local/state/shred-gui/logs/<date>_<time>.log`, readable by you only. The log
+  names the shredded files, so such a file keeps their names after the files are gone - it is an
+  option like the others (remembered, in presets and settings files),
 - export/import of the configuration to/from JSON files (*File → Export/Import settings*,
   *Export… / Import…* buttons), recently used files in *File → Recent settings*,
 - **presets** shipped with the application (`--preset`, *File → Load preset*) and integration

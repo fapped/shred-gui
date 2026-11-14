@@ -275,6 +275,8 @@ void MainWindow::buildUi()
     m_startButton->setStyleSheet(QStringLiteral("QPushButton:enabled { color: white; background-color: #c62828; "
                                                 "font-weight: bold; padding: 4px 16px; }"));
     m_cancelButton = new QPushButton(QIcon::fromTheme(QStringLiteral("process-stop")), tr("Cancel"), central);
+    m_quitButton = new QPushButton(QIcon::fromTheme(QStringLiteral("application-exit")), tr("Quit"), central);
+    m_quitButton->setToolTip(tr("Close Shred GUI (while shredding, asks first whether to cancel it)."));
     m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
     m_closeWhenFinishedCheck->setToolTip(tr("Quit Shred GUI after everything was shredded successfully. After errors "
                                             "or cancelling the window stays open."));
@@ -282,6 +284,7 @@ void MainWindow::buildUi()
     runRow->addWidget(m_closeWhenFinishedCheck);
     runRow->addWidget(m_startButton);
     runRow->addWidget(m_cancelButton);
+    runRow->addWidget(m_quitButton);
     mainLayout->addLayout(runRow);
 
     m_currentFile = new ElidedLabel(central);
@@ -303,8 +306,17 @@ void MainWindow::buildUi()
     m_log->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     m_log->setMinimumHeight(120);
     auto *clearLog = new QPushButton(tr("Clear log"), logBox);
+    m_logToFileCheck = new QCheckBox(tr("Save the log to a file"), logBox);
+    m_logToFileCheck->setToolTip(tr("Write the log of each run to a file in %1 (readable by you only).\n"
+                                    "The log names the shredded files - the file keeps their names after the "
+                                    "files are gone.")
+                                     .arg(RunLog::defaultDirectory(QStringLiteral("shred-gui"))));
+    auto *logButtons = new QHBoxLayout;
+    logButtons->addWidget(m_logToFileCheck);
+    logButtons->addStretch(1);
+    logButtons->addWidget(clearLog);
     logLayout->addWidget(m_log, 1);
-    logLayout->addWidget(clearLog, 0, Qt::AlignRight);
+    logLayout->addLayout(logButtons);
     mainLayout->addWidget(logBox, 1);
 
     setCentralWidget(central);
@@ -337,6 +349,7 @@ void MainWindow::buildUi()
     connect(exportButton, &QPushButton::clicked, this, &MainWindow::exportSettings);
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::startShred);
     connect(m_cancelButton, &QPushButton::clicked, this, &MainWindow::cancelShred);
+    connect(m_quitButton, &QPushButton::clicked, this, &QWidget::close); // closeEvent() asks while shredding
     connect(clearLog, &QPushButton::clicked, m_log, &QPlainTextEdit::clear);
     // A window preference, not a shred option: remembered right away, also in a preset (session-only) window.
     connect(m_closeWhenFinishedCheck, &QCheckBox::toggled, this, [](bool on) {
@@ -349,7 +362,8 @@ void MainWindow::buildUi()
     };
     connect(m_programCombo, &QComboBox::currentTextChanged, this, refresh);
     connect(m_iterationsSpin, &QSpinBox::valueChanged, this, refresh);
-    for (QCheckBox *box : {m_zeroCheck, m_forceCheck, m_exactCheck, m_verboseCheck, m_sizeCheck, m_randomCheck})
+    for (QCheckBox *box : {m_zeroCheck, m_forceCheck, m_exactCheck, m_verboseCheck, m_sizeCheck, m_randomCheck,
+                           m_logToFileCheck})
         connect(box, &QCheckBox::toggled, this, refresh);
     connect(m_sizeEdit, &QLineEdit::textChanged, this, refresh);
     connect(m_randomEdit, &QLineEdit::textChanged, this, refresh);
@@ -475,6 +489,7 @@ ShredOptions MainWindow::currentOptions() const
     o.useRandomSource = m_randomCheck->isChecked();
     o.randomSource = m_randomEdit->text().trimmed();
     o.removeMode = static_cast<ShredOptions::RemoveMode>(m_removeCombo->currentData().toInt());
+    o.logToFile = m_logToFileCheck->isChecked();
     return o;
 }
 
@@ -493,6 +508,7 @@ void MainWindow::applyOptions(const ShredOptions &o)
     m_randomCheck->setChecked(o.useRandomSource);
     m_randomEdit->setText(o.randomSource);
     m_removeCombo->setCurrentIndex(qMax(0, m_removeCombo->findData(int(o.removeMode))));
+    m_logToFileCheck->setChecked(o.logToFile);
     updatePreview();
     updateControls();
 }
@@ -688,6 +704,7 @@ void MainWindow::updateControls()
     const bool running = isBusy();
     m_targetBox->setEnabled(!running);
     m_optionsBox->setEnabled(!running);
+    m_logToFileCheck->setEnabled(!running); // an option, decided at the start of a run
     if (m_importAction)
         m_importAction->setEnabled(!running);
     if (m_presetMenu)
@@ -969,8 +986,8 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
 
     // shred -u overwrites first and removes afterwards - in a directory without write access the files
     // would end up overwritten but not removed. Ask before anything is written.
+    QStringList unwritable; // logged when the run starts
     if (options.removesFiles()) {
-        QStringList unwritable;
         for (const ShredJob::Plan &plan : std::as_const(plans)) {
             for (const QString &dir : plan.unwritableDirs)
                 unwritable << LocalPath::display(dir);
@@ -996,11 +1013,6 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
             box.exec();
             if (box.clickedButton() != proceed)
                 return;
-            appendLog(ShredJob::LogLevel::Warning,
-                      tr("%n director(y/ies) without write access - files there will not be removed: %1", nullptr,
-                         int(unwritable.size()))
-                          .arg(unwritable.mid(0, 10).join(QStringLiteral(", "))
-                               + (unwritable.size() > 10 ? QStringLiteral(", ...") : QString())));
         }
     }
 
@@ -1116,9 +1128,23 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
     });
     connect(m_job, &ShredJob::finished, this, &MainWindow::onJobFinished);
 
+    QString logFileError;
+    if (options.logToFile)
+        m_runLog.open(RunLog::defaultDirectory(QStringLiteral("shred-gui")), QDateTime::currentDateTime(), &logFileError);
     for (const QString &note : std::as_const(notes))
         appendLog(ShredJob::LogLevel::Warning, note);
     appendLogLines(ShredJob::LogLevel::Info, tr("=== Start: %1 target(s) ===").arg(m_job->plans().size()), true);
+    if (m_runLog.isOpen())
+        appendLog(ShredJob::LogLevel::Info, tr("Log file: %1").arg(m_runLog.path()));
+    else if (options.logToFile)
+        appendLog(ShredJob::LogLevel::Warning, tr("The log is not saved: %1").arg(logFileError));
+    if (!unwritable.isEmpty()) {
+        appendLog(ShredJob::LogLevel::Warning,
+                  tr("%n director(y/ies) without write access - files there will not be removed: %1", nullptr,
+                     int(unwritable.size()))
+                      .arg(unwritable.mid(0, 10).join(QStringLiteral(", "))
+                           + (unwritable.size() > 10 ? QStringLiteral(", ...") : QString())));
+    }
     for (const QString &warning : std::as_const(storageWarnings))
         appendLog(ShredJob::LogLevel::Warning, warning);
     if (!hardLinked.isEmpty()) {
@@ -1211,10 +1237,13 @@ void MainWindow::appendLogLines(ShredJob::LogLevel level, const QString &text, b
         m_log->appendHtml(timeHtml + (color.isEmpty() ? escaped
                                                       : QStringLiteral("<span style=\"color:%1\">%2</span>").arg(color, escaped)));
     }
+    m_runLog.write(now, text);
 }
 
 void MainWindow::onJobFinished()
 {
+    // The job has logged its summary.
+    m_runLog.close();
     const ShredJob::Summary summary = m_job->summary();
     m_progress->stop();
     // Targets that no longer exist were shredded and removed - drop them from the list.
@@ -1262,8 +1291,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
             event->ignore();
             return;
         }
+        appendLog(ShredJob::LogLevel::Warning, tr("Cancelled: the window was closed."));
         delete m_job; // the destructor kills the shred process
         m_desktopProgress->finish(true);
+        m_runLog.close();
     }
     saveSettings();
     event->accept();

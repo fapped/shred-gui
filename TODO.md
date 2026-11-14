@@ -42,6 +42,14 @@
       is matched against the directory listing (each U+FFFD stands for one or more bytes) - one match: the
       exact name, several: only they are listed in the built-in dialog to choose from;
       `FileListing::replacedBytesMatches` with tests
+- [x] Directories without write access (e.g. the read-only attribute on NTFS) are found by the scan and
+      warned about before anything is overwritten - shred -u would zero the files and fail to remove them
+- [x] Task manager progress: left to Plasma (the average of the jobs of the application); without a job
+      view server the progress of all running instances is combined (over D-Bus)
+- [x] *Current file* cut at the start with "…" - a long path does not widen the window
+- [x] *Save the log to a file* under the log (an option like the others, off by default: the file would
+      keep the names of the shredded files) - `RunLog`, one file per run in `~/.local/state/shred-gui/logs`
+- [x] *Quit* button next to *Shred* and *Cancel*
 
 ## To do
 

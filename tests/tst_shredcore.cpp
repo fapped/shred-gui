@@ -1,6 +1,7 @@
 #include "combinedprogress.h"
 #include "filelisting.h"
 #include "localpath.h"
+#include "runlog.h"
 #include "shredjob.h"
 #include "shredoptions.h"
 #include "speedhistory.h"
@@ -155,6 +156,7 @@ private slots:
     void flashDevices();
     void storageWarnings();
     void inspectRealPaths();
+    void runLogFiles();
     void scanFindsHardLinks();
     void scanFindsUnwritableDirs();
     void scanCanBeCancelled();
@@ -189,6 +191,7 @@ ShredOptions customOptions()
     o.useRandomSource = true;
     o.randomSource = QStringLiteral("/dev/urandom");
     o.removeMode = ShredOptions::RemoveMode::WipeSync;
+    o.logToFile = true;
     return o;
 }
 
@@ -1050,6 +1053,50 @@ void TestShredCore::inspectRealPaths()
     const StorageCheck::Info proc = StorageCheck::inspect(QStringLiteral("/proc/self"));
     QCOMPARE(proc.fileSystem, QStringLiteral("proc"));
     QVERIFY(!proc.flash);
+}
+
+void TestShredCore::runLogFiles()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString dir = tmp.filePath(QStringLiteral("state/app/logs"));
+    const QDateTime start(QDate(2026, 11, 14), QTime(12, 17, 50));
+
+    RunLog first;
+    QString error;
+    QVERIFY2(first.open(dir, start, &error), qPrintable(error));
+    QCOMPARE(first.path(), dir + QStringLiteral("/2026-11-14_12-17-50.log"));
+    // A second run started in the same second gets a name of its own.
+    RunLog second;
+    QVERIFY2(second.open(dir, start, &error), qPrintable(error));
+    QCOMPARE(second.path(), dir + QStringLiteral("/2026-11-14_12-17-50_2.log"));
+    second.close();
+
+    first.write(start, QStringLiteral("=== Start ===\nshred: 'zażółć': pass 1/4"));
+    first.write(start.addSecs(1), QStringLiteral("done"));
+    first.close();
+    QVERIFY(!first.isOpen());
+    first.write(start, QStringLiteral("ignored after close"));
+
+    QFile file(dir + QStringLiteral("/2026-11-14_12-17-50.log"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(file.readAll()),
+             QStringLiteral("2026-11-14 12:17:50 === Start ===\n2026-11-14 12:17:50 shred: 'zażółć': pass 1/4\n"
+                            "2026-11-14 12:17:51 done\n"));
+    // The log names the processed files: readable by the user only.
+    QCOMPARE(file.permissions() & ~(QFileDevice::ReadUser | QFileDevice::WriteUser),
+             QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    QCOMPARE(QFile::permissions(dir) & (QFileDevice::ReadGroup | QFileDevice::ReadOther | QFileDevice::ExeOther),
+             QFileDevice::Permissions());
+
+    // Off by default, kept by the settings and the JSON like the other options.
+    QVERIFY(!ShredOptions().logToFile);
+    QCOMPARE(ShredOptions().toJson().value("logToFile").toBool(true), false);
+    ShredOptions base;
+    base.logToFile = true;
+    QVERIFY(ShredOptions::fromJson(QJsonObject{{"iterations", 1}}, &error, base).logToFile);
+
+    QVERIFY(RunLog::defaultDirectory(QStringLiteral("shred-gui")).endsWith(QStringLiteral("/shred-gui/logs")));
 }
 
 void TestShredCore::scanFindsHardLinks()
