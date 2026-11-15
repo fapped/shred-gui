@@ -56,4 +56,7 @@
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] Nautilus / Nemo integration (scripts or an extension)
-- [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
+- [x] `.deb` package: `tools/make-deb.sh` (CPack, dependencies from dpkg-shlibdeps), checked with apt in a
+      clean Ubuntu 26.04 container (2026-11-15)
+- [ ] AppImage (own Qt: no Plasma theme plugin, the Dolphin menu needs an install option), CI (Gitea Actions:
+      build + tests + the .deb; needs a runner)

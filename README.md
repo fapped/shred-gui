@@ -110,6 +110,26 @@ cmake --install build --prefix ~/.local
 
 The Dolphin menu can be skipped with `cmake -S . -B build -DSHRED_GUI_INSTALL_SERVICEMENUS=OFF`.
 
+### Debian package
+
+`tools/make-deb.sh` builds a `.deb` (Release, installed to `/usr`: the program, the `.desktop` entry, the
+presets and the Dolphin menu) into `build-deb/`:
+
+```bash
+tools/make-deb.sh
+```
+
+```bash
+sudo apt install ./build-deb/shred-gui_0.1.0_amd64.deb
+```
+
+The dependencies are `coreutils` (shred) and the Qt 6 libraries; recommended: `qt6-wayland`; suggested: `dolphin`. The library versions come from the system the package
+is built on (`dpkg-shlibdeps`), so a package built on Ubuntu 26.04 (Qt 6.10) installs on that release and newer
+ones; for an older system build it there. The script builds in a temporary directory under `/tmp`: CPack takes
+the file modes from the staging directory, and a file system without Unix permissions (NTFS, exFAT) would give
+a package with every file `rwx------`. Checked with `apt install` and `apt remove` in a clean `ubuntu:26.04`
+container.
+
 Uninstalling (removes exactly the files listed by the last `cmake --install` from this build directory):
 
 ```bash

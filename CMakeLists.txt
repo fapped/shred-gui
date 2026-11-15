@@ -73,6 +73,31 @@ if(SHRED_GUI_INSTALL_SERVICEMENUS)
     )
 endif()
 
+# Debian package: tools/make-deb.sh (cpack -G DEB in a Release build on a file system with Unix permissions,
+# see README, "Debian package"). The package installs to /usr; the .desktop files then point to /usr/bin/shred-gui. The library dependencies (Qt) are
+# found by dpkg-shlibdeps.
+set(CPACK_GENERATOR DEB)
+set(CPACK_PACKAGE_NAME shred-gui)
+set(CPACK_PACKAGE_VENDOR fapped)
+set(CPACK_PACKAGE_CONTACT "fapped <5470801+fapped@users.noreply.github.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Qt GUI for shred: securely overwrite and delete files, with a Dolphin context menu")
+string(CONCAT CPACK_DEBIAN_PACKAGE_DESCRIPTION
+    "A graphical front end for GNU shred: files and directories to overwrite and remove,\n"
+    "the shred options, progress per file and overall, Plasma task manager and notification\n"
+    "progress, presets and a Dolphin context menu.")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/fapped/shred-gui")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
+set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_SECTION utils)
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "coreutils")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qt6-wayland")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "dolphin")
+include(CPack)
+
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     qt_add_executable(tst_shredcore tests/tst_shredcore.cpp)
