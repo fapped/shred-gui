@@ -208,12 +208,13 @@ you can also add your own presets (any `*.json` name, format as below).
 After installation Dolphin shows a **Shred** submenu (left: a file, right: a directory):
 
 <p>
-<img src="docs/screenshots/context-menu-file.png" width="49%" alt="The Shred submenu in Dolphin for a file: two entries">
-<img src="docs/screenshots/context-menu-dir.png" width="49%" alt="The Shred submenu in Dolphin for a directory: one entry">
+<img src="docs/screenshots/context-menu-file.png" width="49%" alt="The Shred submenu in Dolphin for a file: three entries">
+<img src="docs/screenshots/context-menu-dir.png" width="49%" alt="The Shred submenu in Dolphin for a directory: two entries">
 </p>
 
 - **Shred and delete permanently (-n 3 -z -u)…** — files and directories (`--preset shred-delete`),
-- **Overwrite only, keep the file (-n 3 -z)…** — files only (`--preset shred-overwrite`).
+- **Overwrite only, keep the file (-n 3 -z)…** — files only (`--preset shred-overwrite`),
+- **Shred on SSD (one pass, then TRIM) (-n 1 -u + TRIM)…** — files and directories (`--preset shred-ssd`).
 
 Clicking an entry opens Shred GUI with the selected items in the list and the preset loaded —
 nothing happens automatically, you still have to click *Shred* and confirm. Several selected
