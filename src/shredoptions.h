@@ -36,6 +36,13 @@ struct ShredOptions
     // Not a shred option: the log of each run is also written to a file (see RunLog). Off by default -
     // the log names the shredded files, and the file would keep the names after the files are gone.
     bool logToFile = false;
+    // Not a shred option: after the files are removed, fstrim tells flash storage which blocks are free, so that its
+    // controller can erase the cells with the old data (see ShredJob). Needs administrator rights (pkexec).
+    bool trimAfter = false;
+    // How fstrim is run (not saved): the program, and the program that runs it with administrator rights (empty:
+    // directly - also when this process is root).
+    QString fstrimProgram = QStringLiteral("fstrim");
+    QString elevateProgram = QStringLiteral("pkexec");
 
     bool removesFiles() const { return removeMode != RemoveMode::None; }
     // Whether directory names should be obfuscated (renamed to zeros) before removal, like shred does.

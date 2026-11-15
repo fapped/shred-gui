@@ -129,6 +129,8 @@ QString ShredOptions::summaryFlags() const
         parts << QStringLiteral("-u");
     else if (removeMode != RemoveMode::None)
         parts << QStringLiteral("--remove=") + removeModeName(removeMode);
+    if (trimAfter && removesFiles())
+        parts << QStringLiteral("+ TRIM");
     return parts.join(QLatin1Char(' '));
 }
 
@@ -176,6 +178,7 @@ void ShredOptions::save(QSettings &settings) const
     settings.setValue(QStringLiteral("randomSource"), randomSource);
     settings.setValue(QStringLiteral("removeMode"), static_cast<int>(removeMode));
     settings.setValue(QStringLiteral("logToFile"), logToFile);
+    settings.setValue(QStringLiteral("trimAfter"), trimAfter);
     settings.endGroup();
 }
 
@@ -194,6 +197,7 @@ ShredOptions ShredOptions::load(QSettings &settings)
     o.useRandomSource = settings.value(QStringLiteral("useRandomSource"), o.useRandomSource).toBool();
     o.randomSource = settings.value(QStringLiteral("randomSource"), o.randomSource).toString();
     o.logToFile = settings.value(QStringLiteral("logToFile"), o.logToFile).toBool();
+    o.trimAfter = settings.value(QStringLiteral("trimAfter"), o.trimAfter).toBool();
     const int mode = settings.value(QStringLiteral("removeMode"), static_cast<int>(o.removeMode)).toInt();
     if (mode >= static_cast<int>(RemoveMode::None) && mode <= static_cast<int>(RemoveMode::WipeSync))
         o.removeMode = static_cast<RemoveMode>(mode);
@@ -216,6 +220,7 @@ QJsonObject ShredOptions::toJson() const
         {QStringLiteral("randomSource"), randomSource},
         {QStringLiteral("removeMode"), removeModeName(removeMode)},
         {QStringLiteral("logToFile"), logToFile},
+        {QStringLiteral("trimAfter"), trimAfter},
     };
 }
 
@@ -238,7 +243,8 @@ ShredOptions ShredOptions::fromJson(const QJsonObject &json, QString *error, con
         && readString(json, "size", &o.size, error)
         && readBool(json, "useRandomSource", &o.useRandomSource, error)
         && readString(json, "randomSource", &o.randomSource, error)
-        && readBool(json, "logToFile", &o.logToFile, error);
+        && readBool(json, "logToFile", &o.logToFile, error)
+        && readBool(json, "trimAfter", &o.trimAfter, error);
     if (!ok)
         return {};
 
@@ -429,7 +435,8 @@ bool ShredOptions::operator==(const ShredOptions &other) const
     return program == other.program && iterations == other.iterations && force == other.force
         && verbose == other.verbose && exact == other.exact && zero == other.zero && useSize == other.useSize
         && size == other.size && useRandomSource == other.useRandomSource && randomSource == other.randomSource
-        && removeMode == other.removeMode && logToFile == other.logToFile;
+        && removeMode == other.removeMode && logToFile == other.logToFile && trimAfter == other.trimAfter
+        && fstrimProgram == other.fstrimProgram && elevateProgram == other.elevateProgram;
 }
 
 QString shellQuote(const QString &arg)

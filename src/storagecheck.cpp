@@ -65,7 +65,8 @@ QString sysfsDirOfDevice(quint32 major, quint32 minor)
     return QFileInfo::exists(dir) ? dir : QString();
 }
 
-bool flashDevice(const QString &sysfsBlockDir, int depth);
+void walkStack(const QString &sysfsBlockDir, int depth, DeviceStack *stack);
+bool topDiscard(const QString &sysfsBlockDir);
 
 Info inspectPath(const QString &path, int depth)
 {
@@ -87,39 +88,65 @@ Info inspectPath(const QString &path, int depth)
         if (!device.isEmpty())
             sysfsDir = QStringLiteral("/sys/class/block/") + QFileInfo(device).fileName();
     }
-    if (!sysfsDir.isEmpty())
-        info.flash = flashDevice(sysfsDir, depth);
+    if (!sysfsDir.isEmpty()) {
+        DeviceStack stack;
+        walkStack(sysfsDir, depth, &stack);
+        info.flash = stack.flash;
+        info.encrypted = stack.encrypted;
+        info.discard = topDiscard(sysfsDir);
+    }
+    info.encrypted = info.encrypted || isEncryptingFileSystem(info.fileSystem);
     return info;
 }
 
-bool flashDevice(const QString &sysfsBlockDir, int depth)
+// A partition has no queue of its own and is not "removable" - the whole disk (its parent) is.
+QByteArray deviceAttribute(const QString &dir, const QString &name)
+{
+    const QByteArray own = readSysfs(dir + name);
+    return own.isEmpty() ? readSysfs(QFileInfo(dir).path() + name) : own;
+}
+
+bool topDiscard(const QString &sysfsBlockDir)
+{
+    const QString dir = QFileInfo(sysfsBlockDir).canonicalFilePath();
+    if (dir.isEmpty())
+        return false;
+    const QByteArray maxBytes = deviceAttribute(dir, QStringLiteral("/queue/discard_max_bytes"));
+    return !maxBytes.isEmpty() && maxBytes != "0";
+}
+
+void walkStack(const QString &sysfsBlockDir, int depth, DeviceStack *stack)
 {
     const QString dir = QFileInfo(sysfsBlockDir).canonicalFilePath();
     if (dir.isEmpty() || depth > kMaxDepth)
-        return false;
+        return;
+
+    // dm-crypt: "CRYPT-LUKS2-<uuid>-<name>", "CRYPT-PLAIN-...", "CRYPT-TCRYPT-..." (cryptsetup); VeraCrypt itself
+    // creates its devices without a uuid, named "veracrypt<n>" (TrueCrypt: "truecrypt<n>").
+    const QByteArray uuid = readSysfs(dir + QStringLiteral("/dm/uuid"));
+    const QByteArray name = readSysfs(dir + QStringLiteral("/dm/name"));
+    if (uuid.startsWith("CRYPT-") || name.startsWith("veracrypt") || name.startsWith("truecrypt"))
+        stack->encrypted = true;
 
     // A device mapper or RAID device: what matters is where the data really is. Its own "rotational" flag
     // does not tell (e.g. dm-crypt reports 0 even on a hard disk with some kernels).
     const QStringList slaves = QDir(dir + QStringLiteral("/slaves")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     if (!slaves.isEmpty()) {
-        for (const QString &slave : slaves) {
-            if (flashDevice(dir + QStringLiteral("/slaves/") + slave, depth + 1))
-                return true;
-        }
-        return false;
+        for (const QString &slave : slaves)
+            walkStack(dir + QStringLiteral("/slaves/") + slave, depth + 1, stack);
+        return;
     }
     const QByteArray backingFile = readSysfs(dir + QStringLiteral("/loop/backing_file"));
-    if (!backingFile.isEmpty())
-        return inspectPath(LocalPath::decode(backingFile), depth + 1).flash;
-
-    // A partition has no queue of its own and is not "removable" - the whole disk (its parent) is.
-    const QString parent = QFileInfo(dir).path();
-    auto attribute = [&](const QString &name) {
-        const QByteArray own = readSysfs(dir + name);
-        return own.isEmpty() ? readSysfs(parent + name) : own;
-    };
+    if (!backingFile.isEmpty()) {
+        const Info backing = inspectPath(LocalPath::decode(backingFile), depth + 1);
+        stack->flash = stack->flash || backing.flash;
+        stack->encrypted = stack->encrypted || backing.encrypted;
+        return;
+    }
     // USB sticks and memory card readers often claim to be rotational, but they are removable.
-    return attribute(QStringLiteral("/queue/rotational")) == "0" || attribute(QStringLiteral("/removable")) == "1";
+    if (deviceAttribute(dir, QStringLiteral("/queue/rotational")) == "0"
+        || deviceAttribute(dir, QStringLiteral("/removable")) == "1")
+        stack->flash = true;
 }
 
 } // namespace
@@ -152,7 +179,22 @@ Info parseMountInfo(const QByteArray &mountInfo, quint32 major, quint32 minor, c
 
 bool isFlashDevice(const QString &sysfsBlockDir)
 {
-    return flashDevice(sysfsBlockDir, 0);
+    return inspectStack(sysfsBlockDir).flash;
+}
+
+DeviceStack inspectStack(const QString &sysfsBlockDir)
+{
+    DeviceStack stack;
+    walkStack(sysfsBlockDir, 0, &stack);
+    stack.discard = topDiscard(sysfsBlockDir);
+    return stack;
+}
+
+bool isEncryptingFileSystem(const QString &fileSystem)
+{
+    static const QStringList encrypting{QStringLiteral("ecryptfs"), QStringLiteral("fuse.gocryptfs"),
+                                        QStringLiteral("fuse.cryfs"), QStringLiteral("fuse.encfs")};
+    return encrypting.contains(fileSystem);
 }
 
 Info inspect(const QString &path)
@@ -167,7 +209,10 @@ Info inspectDevice(quint32 major, quint32 minor)
     if (dir.isEmpty())
         return info;
     info.source = QStringLiteral("/dev/") + QFileInfo(QFileInfo(dir).canonicalFilePath()).fileName();
-    info.flash = isFlashDevice(dir);
+    const DeviceStack stack = inspectStack(dir);
+    info.flash = stack.flash;
+    info.encrypted = stack.encrypted;
+    info.discard = stack.discard;
     return info;
 }
 
@@ -200,10 +245,23 @@ QStringList warnings(const Info &info)
                       .arg(name);
     }
     if (info.flash) {
-        result << QObject::tr("%1: flash storage (SSD, USB stick or memory card) - its controller writes the new "
-                              "data to other cells, the old content can stay readable on the chips. Encryption "
-                              "or the secure erase of the whole device protect reliably.")
-                      .arg(name);
+        QString text = QObject::tr("%1: flash storage (SSD, USB stick or memory card) - its controller writes the "
+                                   "new data to other cells, the old content can stay readable on the chips.")
+                           .arg(name);
+        if (info.encrypted) {
+            text += QLatin1Char(' ')
+                + QObject::tr("The data is encrypted there, so what stays on the chips is readable only with the key.");
+        } else {
+            text += QLatin1Char(' ')
+                + QObject::tr("Encryption or the secure erase of the whole device (Tools menu) protect reliably.");
+        }
+        if (!info.mountPoint.isEmpty()) {
+            text += QLatin1Char(' ')
+                + (info.discard ? QObject::tr("TRIM after removing lets the device erase the freed cells.")
+                                : QObject::tr("TRIM does not reach the device here (discard is not passed through, "
+                                              "e.g. by an encrypted volume opened without allow-discards)."));
+        }
+        result << text;
     }
     return result;
 }

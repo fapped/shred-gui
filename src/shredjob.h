@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shredoptions.h"
+#include "storagecheck.h"
 
 #include <QElapsedTimer>
 #include <QList>
@@ -38,6 +39,7 @@ public:
         QStringList skipped; // mount points of other file systems - skipped
         QStringList hardLinked; // files of `files` with other hard links (names elsewhere)
         QStringList storageWarnings; // where overwriting in place does not reach the old data (see StorageCheck)
+        StorageCheck::Info storage;  // the storage of the target
         // Directories in which entries have to be removed or renamed but which this process cannot write to
         // (e.g. folders with the read-only attribute on NTFS) - shred -u would overwrite the files there
         // and then fail to remove them.
@@ -56,6 +58,7 @@ public:
         int dirsRemoved = 0;
         int dirsFailed = 0;
         int warnings = 0; // warnings and errors in the log of the job (e.g. a mount point skipped)
+        int trimmed = 0;  // file systems trimmed after removing (ShredOptions::trimAfter)
         bool cancelled = false;
         bool aborted = false; // e.g. shred could not be started
 
@@ -83,6 +86,13 @@ public:
                                ScanControl *control = nullptr);
     // Paths that must never be processed recursively (/, the home directory, system directories).
     static bool isProtectedPath(const QString &path);
+
+    // TRIM after removing (ShredOptions::trimAfter): the mount points of file systems on flash storage that pass
+    // discard requests, and those on flash storage that do not (TRIM would not reach the device).
+    static QStringList trimMountPoints(const QList<Plan> &plans, QStringList *withoutDiscard = nullptr);
+    // The command that trims `mountPoints` - one process, so that the password is asked for only once:
+    // "[pkexec] /bin/sh -c 'for m; do fstrim -v -- \"$m\" || rc=$?; done; exit $rc' sh <mount points>".
+    static QStringList trimCommand(const ShredOptions &options, const QStringList &mountPoints);
 
     ShredJob(Plan plan, ShredOptions options, QObject *parent = nullptr);
     ShredJob(QList<Plan> plans, ShredOptions options, QObject *parent = nullptr);
@@ -122,6 +132,9 @@ private:
     void onProcessError(QProcess::ProcessError error);
     void removeLeftovers(const Plan &plan);
     void finish();
+    // Runs fstrim when it is wanted and useful; false if nothing was started (then finish() follows).
+    bool startTrim();
+    void onTrimFinished(int exitCode, QProcess::ExitStatus status);
     void emitProgress(double currentFraction);
     void pollWrittenBytes();
     qint64 updateRate(qint64 processed);
@@ -151,4 +164,5 @@ private:
     bool m_planAnnounced = false;
     bool m_running = false;
     bool m_cancelRequested = false;
+    bool m_trimming = false;
 };

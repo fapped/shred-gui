@@ -1,10 +1,13 @@
 #include "mainwindow.h"
 #include "desktopprogress.h"
+#include "deviceerasedialog.h"
 #include "elidedlabel.h"
 #include "filedialog.h"
 #include "filelisting.h"
 #include "localpath.h"
 #include "speedgraph.h"
+
+#include <algorithm>
 
 #include <QAction>
 #include <QApplication>
@@ -250,6 +253,14 @@ void MainWindow::buildUi()
     m_removeCombo->setToolTip(tr("Removing files is required for directories. Subdirectory names are obfuscated "
                                  "the same way as file names (for the wipe/wipesync/-u modes)."));
     form->addRow(tr("Removal:"), m_removeCombo);
+    m_trimCheck = new QCheckBox(tr("TRIM flash storage after removing (fstrim, asks for the administrator password)"),
+                                m_optionsBox);
+    m_trimCheck->setToolTip(tr("On an SSD, USB stick or memory card overwriting does not reach the old cells - the "
+                               "controller writes elsewhere. After the files are removed, fstrim tells the device "
+                               "which blocks are free, so that it can erase them (most devices then read them as "
+                               "zeros). Only file systems on flash storage that pass discard requests are trimmed; "
+                               "the whole file system is trimmed, not only the removed files."));
+    form->addRow(QString(), m_trimCheck);
 
     auto *settingsRow = new QHBoxLayout;
     auto *defaultsButton = new QPushButton(tr("Restore defaults"), m_optionsBox);
@@ -411,6 +422,7 @@ void MainWindow::buildUi()
     connect(m_sizeEdit, &QLineEdit::textChanged, this, refresh);
     connect(m_randomEdit, &QLineEdit::textChanged, this, refresh);
     connect(m_removeCombo, &QComboBox::currentIndexChanged, this, refresh);
+    connect(m_trimCheck, &QCheckBox::toggled, this, refresh);
 }
 
 void MainWindow::buildMenus()
@@ -432,8 +444,20 @@ void MainWindow::buildMenus()
                                         &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
 
+    QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
+    m_eraseDeviceAction = toolsMenu->addAction(QIcon::fromTheme(QStringLiteral("drive-harddisk")),
+                                               tr("&Erase a whole device..."), this, &MainWindow::showDeviceErase);
+    m_eraseDeviceAction->setToolTip(tr("Secure erase of a whole SSD or encrypted volume (NVMe sanitize/format, "
+                                       "ATA Secure Erase, LUKS key erase, TRIM of the whole device)"));
+
     QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(tr("&About"), this, &MainWindow::showAbout);
+}
+
+void MainWindow::showDeviceErase()
+{
+    DeviceEraseDialog dialog(this);
+    dialog.exec();
 }
 
 void MainWindow::populatePresetMenu()
@@ -535,6 +559,7 @@ ShredOptions MainWindow::currentOptions() const
     o.randomSource = m_randomEdit->text().trimmed();
     o.removeMode = static_cast<ShredOptions::RemoveMode>(m_removeCombo->currentData().toInt());
     o.logToFile = m_logToFileCheck->isChecked();
+    o.trimAfter = m_trimCheck->isChecked();
     return o;
 }
 
@@ -554,6 +579,7 @@ void MainWindow::applyOptions(const ShredOptions &o)
     m_randomEdit->setText(o.randomSource);
     m_removeCombo->setCurrentIndex(qMax(0, m_removeCombo->findData(int(o.removeMode))));
     m_logToFileCheck->setChecked(o.logToFile);
+    m_trimCheck->setChecked(o.trimAfter);
     updatePreview();
     updateControls();
 }
@@ -752,11 +778,14 @@ void MainWindow::updateControls()
     m_logToFileCheck->setEnabled(!running); // an option, decided at the start of a run
     if (m_importAction)
         m_importAction->setEnabled(!running);
+    if (m_eraseDeviceAction)
+        m_eraseDeviceAction->setEnabled(!running);
     if (m_presetMenu)
         m_presetMenu->setEnabled(!running);
     if (m_recentSettingsMenu)
         m_recentSettingsMenu->setEnabled(!running);
     m_sizeEdit->setEnabled(m_sizeCheck->isChecked());
+    m_trimCheck->setEnabled(m_removeCombo->currentData().toInt() != int(ShredOptions::RemoveMode::None));
     m_randomEdit->setEnabled(m_randomCheck->isChecked());
     m_randomBrowse->setEnabled(m_randomCheck->isChecked());
     m_removeTargetsButton->setEnabled(!m_targetList->selectedItems().isEmpty());
@@ -1137,6 +1166,28 @@ void MainWindow::confirmAndStart(const QList<ShredJob::Plan> &scanned, const QSt
         text += tr("<br><br><b>Overwriting may not destroy the old data here:</b>");
         for (const QString &warning : std::as_const(storageWarnings))
             text += QStringLiteral("<br>&bull; ") + warning.toHtmlEscaped();
+    }
+    const bool anyFlash = std::any_of(plans.cbegin(), plans.cend(), [](const ShredJob::Plan &plan) {
+        return plan.error.isEmpty() && plan.storage.flash;
+    });
+    if (anyFlash && options.iterations > 1) {
+        text += tr("<br><br>On flash storage more passes do not help - they only wear the device. One pass and TRIM "
+                   "after removing are enough (preset \"Shred on SSD\").");
+    }
+    if (options.trimAfter && options.removesFiles()) {
+        QStringList withoutDiscard;
+        const QStringList mountPoints = ShredJob::trimMountPoints(plans, &withoutDiscard);
+        if (!mountPoints.isEmpty()) {
+            text += tr("<br><br>Afterwards TRIM of <b>%1</b> (asks for the administrator password).")
+                        .arg(LocalPath::display(mountPoints.join(QStringLiteral(", "))).toHtmlEscaped());
+        }
+        if (!withoutDiscard.isEmpty()) {
+            text += tr("<br><br>TRIM does not reach the flash storage of <b>%1</b> (discard is not passed through) - "
+                       "it is skipped there.")
+                        .arg(LocalPath::display(withoutDiscard.join(QStringLiteral(", "))).toHtmlEscaped());
+        }
+        if (mountPoints.isEmpty() && withoutDiscard.isEmpty())
+            text += tr("<br><br>TRIM: none of the targets is on flash storage - nothing to trim.");
     }
     for (const QString &note : std::as_const(notes))
         text += QStringLiteral("<br>") + note.toHtmlEscaped();

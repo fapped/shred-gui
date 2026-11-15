@@ -18,6 +18,7 @@ add_library(shredcore STATIC
     src/shredoptions.h src/shredoptions.cpp
     src/shredjob.h src/shredjob.cpp
     src/storagecheck.h src/storagecheck.cpp
+    src/deviceerase.h src/deviceerase.cpp
     src/speedhistory.h src/speedhistory.cpp
     src/filelisting.h src/filelisting.cpp
     src/runlog.h src/runlog.cpp
@@ -34,6 +35,7 @@ qt_add_executable(shred-gui
     src/speedgraph.h src/speedgraph.cpp
     src/filedialog.h src/filedialog.cpp
     src/elidedlabel.h src/elidedlabel.cpp
+    src/deviceerasedialog.h src/deviceerasedialog.cpp
 )
 target_link_libraries(shred-gui PRIVATE shredcore Qt6::Widgets Qt6::DBus)
 
@@ -44,6 +46,7 @@ option(SHRED_GUI_INSTALL_SERVICEMENUS "Install the Dolphin (KDE) context menu en
 set(SHRED_GUI_PRESETS
     presets/shred-delete.json
     presets/shred-overwrite.json
+    presets/shred-ssd.json
 )
 foreach(preset IN LISTS SHRED_GUI_PRESETS)
     configure_file(${preset} ${CMAKE_CURRENT_BINARY_DIR}/${preset} COPYONLY)
@@ -56,7 +59,7 @@ install(TARGETS shred-gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 set(SHRED_GUI_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/packaging)
 install(CODE "
     set(SHRED_GUI_EXECUTABLE \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/shred-gui\")
-    foreach(file shred-gui.desktop servicemenus/shred-gui-delete.desktop servicemenus/shred-gui-overwrite.desktop)
+    foreach(file shred-gui.desktop servicemenus/shred-gui-delete.desktop servicemenus/shred-gui-overwrite.desktop servicemenus/shred-gui-ssd.desktop)
         configure_file(\"${CMAKE_CURRENT_SOURCE_DIR}/packaging/\${file}.in\"
                        \"${SHRED_GUI_GENERATED_DIR}/\${file}\" @ONLY)
     endforeach()
@@ -68,6 +71,7 @@ if(SHRED_GUI_INSTALL_SERVICEMENUS)
     install(FILES
         ${SHRED_GUI_GENERATED_DIR}/servicemenus/shred-gui-delete.desktop
         ${SHRED_GUI_GENERATED_DIR}/servicemenus/shred-gui-overwrite.desktop
+        ${SHRED_GUI_GENERATED_DIR}/servicemenus/shred-gui-ssd.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/kio/servicemenus
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     )
@@ -94,8 +98,8 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION utils)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "coreutils")
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qt6-wayland")
-set(CPACK_DEBIAN_PACKAGE_SUGGESTS "dolphin")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qt6-wayland, pkexec")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "dolphin, nvme-cli, hdparm, cryptsetup")
 include(CPack)
 
 if(BUILD_TESTING)

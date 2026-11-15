@@ -1,4 +1,5 @@
 #include "combinedprogress.h"
+#include "deviceerase.h"
 #include "filelisting.h"
 #include "localpath.h"
 #include "runlog.h"
@@ -9,6 +10,7 @@
 
 #include <QDir>
 #include <QJsonDocument>
+#include <QProcess>
 #include <QJsonObject>
 #include <QRandomGenerator>
 #include <QScopeGuard>
@@ -155,6 +157,14 @@ private slots:
     void mountInfo();
     void flashDevices();
     void storageWarnings();
+    void deviceStack();
+    void flashWarnings();
+    void trimPlans();
+    void trimAfterShredding();
+    void trimOption();
+    void lsblkParsing();
+    void eraseMethods();
+    void eraseScripts();
     void inspectRealPaths();
     void runLogFiles();
     void scanFindsHardLinks();
@@ -712,14 +722,22 @@ void TestShredCore::shippedPresets_data()
 {
     QTest::addColumn<QString>("preset");
     QTest::addColumn<int>("mode");
-    QTest::newRow("delete") << "shred-delete" << int(ShredOptions::RemoveMode::Default);
-    QTest::newRow("overwrite") << "shred-overwrite" << int(ShredOptions::RemoveMode::None);
+    QTest::addColumn<int>("iterations");
+    QTest::addColumn<bool>("zero");
+    QTest::addColumn<bool>("trim");
+    QTest::newRow("delete") << "shred-delete" << int(ShredOptions::RemoveMode::Default) << 3 << true << false;
+    QTest::newRow("overwrite") << "shred-overwrite" << int(ShredOptions::RemoveMode::None) << 3 << true << false;
+    // Flash storage: one pass (more only wear the device), then TRIM.
+    QTest::newRow("ssd") << "shred-ssd" << int(ShredOptions::RemoveMode::Default) << 1 << false << true;
 }
 
 void TestShredCore::shippedPresets()
 {
     QFETCH(QString, preset);
     QFETCH(int, mode);
+    QFETCH(int, iterations);
+    QFETCH(bool, zero);
+    QFETCH(bool, trim);
     const QString file = ShredOptions::locatePreset(preset, {QStringLiteral(SHRED_GUI_SOURCE_PRESETS_DIR)});
     QVERIFY(!file.isEmpty());
 
@@ -733,8 +751,10 @@ void TestShredCore::shippedPresets()
     QVERIFY(!name.isEmpty());
     QCOMPARE(o.program, base.program);
     QCOMPARE(int(o.removeMode), mode);
-    QCOMPARE(o.iterations, 3);
-    QVERIFY(o.force && o.zero && o.verbose);
+    QCOMPARE(o.iterations, iterations);
+    QCOMPARE(o.zero, zero);
+    QCOMPARE(o.trimAfter, trim);
+    QVERIFY(o.force && o.verbose);
 }
 
 void TestShredCore::localPathRoundTrip_data()
@@ -923,7 +943,7 @@ void TestShredCore::summaryFlags()
 void TestShredCore::presetNamesMatchDolphinMenu()
 {
     const QList<ShredPreset> presets = ShredOptions::presets({QStringLiteral(SHRED_GUI_SOURCE_PRESETS_DIR)});
-    QCOMPARE(presets.size(), 2);
+    QCOMPARE(presets.size(), 3);
     for (const ShredPreset &preset : presets) {
         QVERIFY2(preset.error.isEmpty(), qPrintable(preset.error));
         QVERIFY2(preset.name != preset.id, qPrintable(preset.id)); // every shipped preset has a name
@@ -1055,6 +1075,417 @@ void TestShredCore::storageWarnings()
     device.source = QStringLiteral("/dev/sdb");
     device.flash = true;
     QVERIFY(StorageCheck::warnings(device).first().startsWith(QStringLiteral("/dev/sdb: flash storage")));
+}
+
+void TestShredCore::deviceStack()
+{
+    // A fake /sys: an SSD with a LUKS volume (discard passed), a VeraCrypt-style volume without discard, a hard disk.
+    QTemporaryDir sys;
+    QVERIFY(sys.isValid());
+    auto mk = [&](const QString &dir, const QByteArray &rotational, const QByteArray &discard) {
+        QVERIFY(QDir().mkpath(sys.filePath(dir + QStringLiteral("/queue"))));
+        writeFile(sys.filePath(dir + QStringLiteral("/queue/rotational")), rotational + '\n');
+        writeFile(sys.filePath(dir + QStringLiteral("/queue/discard_max_bytes")), discard + '\n');
+    };
+    auto dm = [&](const QString &dir, const QByteArray &name, const QByteArray &uuid, const QString &slave) {
+        QVERIFY(QDir().mkpath(sys.filePath(dir + QStringLiteral("/dm"))));
+        QVERIFY(QDir().mkpath(sys.filePath(dir + QStringLiteral("/slaves"))));
+        writeFile(sys.filePath(dir + QStringLiteral("/dm/name")), name + '\n');
+        writeFile(sys.filePath(dir + QStringLiteral("/dm/uuid")), uuid + '\n');
+        QVERIFY(QFile::link(sys.filePath(slave), sys.filePath(dir + QStringLiteral("/slaves/") + QFileInfo(slave).fileName())));
+    };
+    mk(QStringLiteral("sda"), "0", "2147450880");
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("sda/sda1")))); // a partition: the disk's queue counts
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("sda/sda2"))));
+    mk(QStringLiteral("sdc"), "1", "0");
+    QVERIFY(QDir().mkpath(sys.filePath(QStringLiteral("sdc/sdc1"))));
+    mk(QStringLiteral("dm-0"), "0", "2147450880");
+    dm(QStringLiteral("dm-0"), "luks-test", "CRYPT-LUKS2-0123456789abcdef-luks-test", QStringLiteral("sda/sda1"));
+    mk(QStringLiteral("dm-1"), "0", "0");
+    dm(QStringLiteral("dm-1"), "veracrypt3", "", QStringLiteral("sda/sda2"));
+    mk(QStringLiteral("dm-2"), "1", "0");
+    dm(QStringLiteral("dm-2"), "vg-data", "LVM-abc", QStringLiteral("sdc/sdc1"));
+
+    StorageCheck::DeviceStack stack = StorageCheck::inspectStack(sys.filePath(QStringLiteral("sda/sda1")));
+    QVERIFY(stack.flash && !stack.encrypted && stack.discard);
+    stack = StorageCheck::inspectStack(sys.filePath(QStringLiteral("dm-0")));
+    QVERIFY(stack.flash && stack.encrypted && stack.discard);
+    stack = StorageCheck::inspectStack(sys.filePath(QStringLiteral("dm-1"))); // discard not passed through
+    QVERIFY(stack.flash && stack.encrypted && !stack.discard);
+    stack = StorageCheck::inspectStack(sys.filePath(QStringLiteral("dm-2"))); // LVM on a hard disk
+    QVERIFY(!stack.flash && !stack.encrypted && !stack.discard);
+    QVERIFY(!StorageCheck::inspectStack(sys.filePath(QStringLiteral("missing"))).flash);
+
+    QVERIFY(StorageCheck::isEncryptingFileSystem(QStringLiteral("ecryptfs")));
+    QVERIFY(StorageCheck::isEncryptingFileSystem(QStringLiteral("fuse.gocryptfs")));
+    QVERIFY(!StorageCheck::isEncryptingFileSystem(QStringLiteral("ext4")));
+}
+
+void TestShredCore::flashWarnings()
+{
+    StorageCheck::Info info;
+    info.fileSystem = QStringLiteral("ext4");
+    info.mountPoint = QStringLiteral("/data");
+    info.flash = true;
+    QString text = StorageCheck::warnings(info).first();
+    QVERIFY2(text.contains(QStringLiteral("secure erase")) && text.contains(QStringLiteral("TRIM does not reach")),
+             qPrintable(text));
+    info.encrypted = true;
+    info.discard = true;
+    text = StorageCheck::warnings(info).first();
+    QVERIFY2(text.contains(QStringLiteral("only with the key")) && text.contains(QStringLiteral("TRIM after removing")),
+             qPrintable(text));
+    // A device selected directly: nothing about TRIM of a file system.
+    info.mountPoint.clear();
+    QVERIFY(!StorageCheck::warnings(info).first().contains(QStringLiteral("TRIM")));
+}
+
+namespace {
+
+ShredJob::Plan planOn(const QString &target, bool flash, bool discard, const QString &mountPoint)
+{
+    ShredJob::Plan plan = ShredJob::scan(target);
+    plan.storage.flash = flash;
+    plan.storage.discard = discard;
+    plan.storage.mountPoint = mountPoint;
+    return plan;
+}
+
+} // namespace
+
+void TestShredCore::trimPlans()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    for (const char *name : {"a", "b", "c", "d"})
+        writeFile(tmp.filePath(QString::fromLatin1(name)), "x");
+    QList<ShredJob::Plan> plans{planOn(tmp.filePath("a"), true, true, "/data"),
+                                planOn(tmp.filePath("b"), true, true, "/data"),  // the same file system once
+                                planOn(tmp.filePath("c"), true, false, "/crypt"), // discard not passed
+                                planOn(tmp.filePath("d"), false, true, "/hdd")};  // not flash: nothing to trim
+    plans << planOn(tmp.filePath("missing"), true, true, "/gone");                // an error: skipped
+    QStringList without;
+    QCOMPARE(ShredJob::trimMountPoints(plans, &without), QStringList{"/data"});
+    QCOMPARE(without, QStringList{"/crypt"});
+
+    ShredOptions options;
+    options.fstrimProgram = QStringLiteral("/sbin/fstrim");
+    options.elevateProgram.clear();
+    QStringList command = ShredJob::trimCommand(options, {"/data", "/my disk"});
+    QCOMPARE(command.mid(0, 2), (QStringList{"/bin/sh", "-c"}));
+    QVERIFY(command.at(2).contains(QStringLiteral("/sbin/fstrim -v -- \"$m\"")));
+    QCOMPARE(command.mid(3), (QStringList{"sh", "/data", "/my disk"}));
+    if (::geteuid() != 0) {
+        options.elevateProgram = QStringLiteral("pkexec");
+        command = ShredJob::trimCommand(options, {"/data"});
+        QCOMPARE(command.first(), QStringLiteral("pkexec"));
+        QCOMPARE(command.at(1), QStringLiteral("/bin/sh"));
+    }
+}
+
+void TestShredCore::trimAfterShredding()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    // A fake fstrim: records its arguments; fails for a mount point named "bad".
+    const QString record = tmp.filePath(QStringLiteral("trimmed"));
+    const QString fake = tmp.filePath(QStringLiteral("fstrim"));
+    writeFile(fake, QStringLiteral("#!/bin/sh\necho \"$*\" >> '%1'\ncase \"$3\" in */bad) exit 32;; esac\n"
+                                   "echo \"$3: 1 MiB (1048576 bytes) trimmed\"\n").arg(record).toUtf8());
+    QVERIFY(QFile::setPermissions(fake, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    writeFile(tmp.filePath("f1"), "secret");
+    writeFile(tmp.filePath("f2"), "secret");
+
+    ShredOptions options;
+    options.iterations = 1;
+    options.removeMode = ShredOptions::RemoveMode::Unlink;
+    options.trimAfter = true;
+    options.fstrimProgram = fake;
+    options.elevateProgram.clear();
+    const QString good = tmp.filePath(QStringLiteral("good"));
+    {
+        ShredJob job({planOn(tmp.filePath("f1"), true, true, good)}, options);
+        QStringList log;
+        connect(&job, &ShredJob::log, this, [&log](ShredJob::LogLevel, const QString &t) { log << t; });
+        QVERIFY(runJob(job));
+        QVERIFY2(job.summary().clean(), qPrintable(log.join('\n')));
+        QCOMPARE(job.summary().trimmed, 1);
+        QCOMPARE(QString::fromUtf8(readFile(record)).trimmed(), QStringLiteral("-v -- ") + good);
+        QVERIFY(log.join('\n').contains(QStringLiteral("TRIM done")));
+        QVERIFY(log.join('\n').contains(QStringLiteral("trimmed"))); // fstrim's output is logged
+    }
+    {
+        // fstrim fails: the files are removed (ok), but with a warning (the window stays open).
+        ShredJob job({planOn(tmp.filePath("f2"), true, true, tmp.filePath(QStringLiteral("bad")))}, options);
+        QVERIFY(runJob(job));
+        QVERIFY(job.summary().ok());
+        QVERIFY(!job.summary().clean());
+        QCOMPARE(job.summary().trimmed, 0);
+        QVERIFY(!QFileInfo::exists(tmp.filePath("f2")));
+    }
+    {
+        // Nothing removed (overwrite only): no TRIM.
+        writeFile(tmp.filePath("f3"), "secret");
+        QFile::remove(record);
+        options.removeMode = ShredOptions::RemoveMode::None;
+        ShredJob job({planOn(tmp.filePath("f3"), true, true, good)}, options);
+        QVERIFY(runJob(job));
+        QVERIFY(job.summary().clean());
+        QVERIFY(!QFileInfo::exists(record));
+    }
+}
+
+void TestShredCore::trimOption()
+{
+    ShredOptions o;
+    o.removeMode = ShredOptions::RemoveMode::Default;
+    o.iterations = 1;
+    o.trimAfter = true;
+    QCOMPARE(o.summaryFlags(), QStringLiteral("-n 1 -u + TRIM"));
+    QVERIFY(ShredOptions::fromJson(o.toJson()).trimAfter);
+    o.removeMode = ShredOptions::RemoveMode::None; // TRIM only after removing
+    QCOMPARE(o.summaryFlags(), QStringLiteral("-n 1"));
+    QString error;
+    ShredOptions::fromJson(QJsonObject{{"trimAfter", "yes"}}, &error);
+    QVERIFY(!error.isEmpty());
+}
+
+void TestShredCore::lsblkParsing()
+{
+    // util-linux 2.37+: numbers and booleans as JSON types. A laptop: an NVMe SSD with a mounted root and an open
+    // LUKS partition, a SATA SSD with an unused LUKS partition, a USB stick, zram and a loop device (left out).
+    const QByteArray json = R"({"blockdevices": [
+      {"name":"nvme0n1", "path":"/dev/nvme0n1", "type":"disk", "tran":"nvme", "model":"Fast SSD", "serial":"S123",
+       "size":1000204886016, "rota":false, "rm":false, "fstype":null, "mountpoint":null, "disc-max":2199023255040,
+       "children": [
+         {"name":"nvme0n1p1", "path":"/dev/nvme0n1p1", "type":"part", "tran":"nvme", "model":null, "serial":null,
+          "size":536870912, "rota":false, "rm":false, "fstype":"vfat", "mountpoint":"/boot/efi", "disc-max":2199023255040},
+         {"name":"nvme0n1p2", "path":"/dev/nvme0n1p2", "type":"part", "tran":"nvme", "model":null, "serial":null,
+          "size":999666221056, "rota":false, "rm":false, "fstype":"crypto_LUKS", "mountpoint":null, "disc-max":2199023255040,
+          "children": [
+            {"name":"luks-root", "path":"/dev/mapper/luks-root", "type":"crypt", "size":999649443840, "rota":false,
+             "rm":false, "fstype":"ext4", "mountpoint":"/", "disc-max":2199023255040}
+          ]}
+       ]},
+      {"name":"sda", "path":"/dev/sda", "type":"disk", "tran":"sata", "model":"Some SSD", "serial":"X9",
+       "size":500107862016, "rota":false, "rm":false, "fstype":null, "mountpoint":null, "disc-max":0,
+       "children": [
+         {"name":"sda1", "path":"/dev/sda1", "type":"part", "tran":null, "size":500106813440, "rota":false, "rm":false,
+          "fstype":"crypto_LUKS", "mountpoint":null, "disc-max":0}
+       ]},
+      {"name":"sdb", "path":"/dev/sdb", "type":"disk", "tran":"usb", "model":"Stick", "serial":"U1",
+       "size":32010928128, "rota":true, "rm":true, "fstype":"vfat", "mountpoint":null, "disc-max":0},
+      {"name":"zram0", "path":"/dev/zram0", "type":"disk", "size":8589934592, "rota":false, "rm":false,
+       "mountpoint":"[SWAP]", "disc-max":4096},
+      {"name":"loop0", "path":"/dev/loop0", "type":"loop", "size":1048576, "rota":false, "rm":false}
+    ]})";
+    QString error;
+    const QList<DeviceErase::Device> disks = DeviceErase::parseLsblk(json, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(disks.size(), 3);
+    const DeviceErase::Device &nvme = disks.at(0);
+    QCOMPARE(nvme.path, QStringLiteral("/dev/nvme0n1"));
+    QCOMPARE(nvme.size, Q_INT64_C(1000204886016));
+    QVERIFY(nvme.isFlash() && nvme.discard);
+    QCOMPARE(nvme.children.size(), 2);                 // the partitions; the crypt device is not one
+    QVERIFY(nvme.inUse.join('\n').contains(QStringLiteral("/boot/efi")));
+    QVERIFY(nvme.inUse.join('\n').contains(QStringLiteral("mounted at /"))); // from the crypt device below
+    QVERIFY(nvme.children.at(1).inUse.join('\n').contains(QStringLiteral("open as luks-root")));
+    QCOMPARE(nvme.children.at(1).transport, QStringLiteral("nvme"));
+    QCOMPARE(nvme.children.at(1).model, QStringLiteral("Fast SSD")); // inherited from the disk
+
+    const DeviceErase::Device &sata = disks.at(1);
+    QVERIFY(sata.inUse.isEmpty());
+    QCOMPARE(sata.children.first().transport, QStringLiteral("sata"));
+    QVERIFY(sata.children.first().inUse.isEmpty());
+    QVERIFY(disks.at(2).removable && disks.at(2).isFlash()); // a stick that claims to be rotational
+
+    // Older util-linux: everything as strings.
+    const QByteArray old = R"({"blockdevices": [
+      {"name":"sdc", "type":"disk", "tran":"sata", "model":"Old", "serial":"O1", "size":"1000", "rota":"1", "rm":"0",
+       "fstype":null, "mountpoint":null, "disc-max":"0"}]})";
+    const QList<DeviceErase::Device> oldDisks = DeviceErase::parseLsblk(old, &error);
+    QCOMPARE(oldDisks.size(), 1);
+    QCOMPARE(oldDisks.first().path, QStringLiteral("/dev/sdc"));
+    QCOMPARE(oldDisks.first().size, 1000);
+    QVERIFY(oldDisks.first().rotational && !oldDisks.first().isFlash());
+
+    QVERIFY(DeviceErase::parseLsblk("not json", &error).isEmpty());
+    QVERIFY(!error.isEmpty());
+}
+
+void TestShredCore::eraseMethods()
+{
+    using M = DeviceErase::Method;
+    DeviceErase::Device nvme;
+    nvme.type = QStringLiteral("disk");
+    nvme.transport = QStringLiteral("nvme");
+    nvme.discard = true;
+    QCOMPARE(DeviceErase::methods(nvme), (QList<M>{M::NvmeSanitizeCrypto, M::NvmeFormatCrypto, M::NvmeSanitizeBlock,
+                                                   M::NvmeFormatUserData, M::BlkdiscardSecure, M::Blkdiscard}));
+    DeviceErase::Device sata;
+    sata.type = QStringLiteral("disk");
+    sata.transport = QStringLiteral("sata");
+    QCOMPARE(DeviceErase::methods(sata), (QList<M>{M::AtaEnhanced, M::AtaNormal}));
+    // Over USB no ATA security commands; a LUKS partition can lose its keys.
+    DeviceErase::Device usbPart;
+    usbPart.type = QStringLiteral("part");
+    usbPart.transport = QStringLiteral("usb");
+    usbPart.fileSystem = QStringLiteral("crypto_LUKS");
+    QCOMPARE(DeviceErase::methods(usbPart), (QList<M>{M::LuksErase}));
+    // A partition of an NVMe drive: the drive's commands work on the whole drive only.
+    DeviceErase::Device nvmePart = nvme;
+    nvmePart.type = QStringLiteral("part");
+    QCOMPARE(DeviceErase::methods(nvmePart), (QList<M>{M::BlkdiscardSecure, M::Blkdiscard}));
+    for (M method : {M::NvmeSanitizeCrypto, M::AtaEnhanced, M::LuksErase, M::Blkdiscard}) {
+        QVERIFY(!DeviceErase::title(method).isEmpty());
+        QVERIFY(!DeviceErase::description(method).isEmpty());
+        QVERIFY(!DeviceErase::package(method).isEmpty());
+    }
+    QCOMPARE(DeviceErase::package(M::NvmeFormatCrypto), QStringLiteral("nvme-cli"));
+}
+
+void TestShredCore::eraseScripts()
+{
+    // The scripts run with fake tools only (they record their calls) and a device path that is not a device:
+    // nothing real is ever touched. Each fake tool behaves as the FAKE_* variables say.
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString calls = tmp.filePath(QStringLiteral("calls"));
+    const auto tool = [&](const QString &name, const QString &body) -> QString {
+        const QString path = tmp.filePath(name);
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly)
+            || file.write((QStringLiteral("#!/bin/sh\necho \"%1 $*\" >> '%2'\n").arg(name, calls) + body).toUtf8()) < 0)
+            return {};
+        file.close();
+        return QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner) ? path : QString();
+    };
+    DeviceErase::Tools tools;
+    tools.lsblk = tool(QStringLiteral("lsblk"), QStringLiteral(
+        "case \"$*\" in\n"
+        "  *SIZE*) echo \"$FAKE_SIZE\";;\n"
+        "  *SERIAL*) echo \"  $FAKE_SERIAL \";;\n"
+        "  *MOUNTPOINT*) printf \"$FAKE_MOUNTS\";;\n"
+        "  *TYPE*) printf \"$FAKE_TYPES\";;\n"
+        "esac\n"));
+    tools.nvme = tool(QStringLiteral("nvme"), QStringLiteral(
+        "case \"$1\" in\n"
+        "  id-ctrl) echo \"$FAKE_CAPS\";;\n"
+        "  sanitize-log) echo \"$FAKE_SANLOG\";;\n"
+        "  version) echo 'nvme version 2.8';;\n"
+        "esac\n"));
+    tools.hdparm = tool(QStringLiteral("hdparm"), QStringLiteral(
+        "case \"$*\" in\n"
+        "  -I*) printf \"$FAKE_HDPARM\";;\n"
+        "  *--security-erase*) exit ${FAKE_ERASE_RC:-0};;\n"
+        "esac\n"));
+    tools.cryptsetup = tool(QStringLiteral("cryptsetup"), QString());
+    tools.blkdiscard = tool(QStringLiteral("blkdiscard"), QString());
+
+    DeviceErase::Device device;
+    device.name = QStringLiteral("fake0");
+    device.path = tmp.filePath(QStringLiteral("fake0")); // not a block device
+    device.size = 1000;
+    device.serial = QStringLiteral("SN1");
+
+    struct Result { int exitCode; QString output; QStringList calls; };
+    const auto run = [&](DeviceErase::Method method, const QMap<QString, QString> &env) {
+        QFile::remove(calls);
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("FAKE_SIZE"), QStringLiteral("1000"));
+        environment.insert(QStringLiteral("FAKE_SERIAL"), QStringLiteral("SN1"));
+        environment.insert(QStringLiteral("FAKE_MOUNTS"), QStringLiteral("\\n\\n"));
+        environment.insert(QStringLiteral("FAKE_TYPES"), QStringLiteral("disk\\npart\\n"));
+        for (auto it = env.cbegin(); it != env.cend(); ++it)
+            environment.insert(it.key(), it.value());
+        const QStringList command = DeviceErase::command(DeviceErase::script(method, device, tools), QString());
+        QProcess process;
+        process.setProcessEnvironment(environment);
+        process.setProcessChannelMode(QProcess::MergedChannels);
+        process.start(command.first(), command.mid(1));
+        process.waitForFinished(20000);
+        return Result{process.exitCode(), QString::fromUtf8(process.readAll()),
+                      QString::fromUtf8(readFile(calls)).split('\n', Qt::SkipEmptyParts)};
+    };
+    const auto called = [](const Result &r, const QString &prefix) {
+        return std::any_of(r.calls.cbegin(), r.calls.cend(), [&](const QString &c) { return c.startsWith(prefix); });
+    };
+    using M = DeviceErase::Method;
+
+    // The safety checks: another size, another serial number, mounted, an open device on it - nothing runs.
+    for (const QMap<QString, QString> &env : {QMap<QString, QString>{{"FAKE_SIZE", "2000"}},
+                                              QMap<QString, QString>{{"FAKE_SERIAL", "OTHER"}},
+                                              QMap<QString, QString>{{"FAKE_MOUNTS", "\\n/media/x\\n"}},
+                                              QMap<QString, QString>{{"FAKE_MOUNTS", "[SWAP]\\n"}},
+                                              QMap<QString, QString>{{"FAKE_TYPES", "part\\ncrypt\\n"}}}) {
+        const Result r = run(M::Blkdiscard, env);
+        QCOMPARE(r.exitCode, 3);
+        QVERIFY2(r.output.startsWith(QStringLiteral("ERROR: ")), qPrintable(r.output));
+        QVERIFY2(!called(r, QStringLiteral("blkdiscard")), qPrintable(r.calls.join('\n')));
+    }
+
+    Result r = run(M::Blkdiscard, {});
+    QCOMPARE(r.exitCode, 0);
+    QVERIFY(r.calls.contains(QStringLiteral("blkdiscard -f -v ") + device.path));
+    r = run(M::BlkdiscardSecure, {});
+    QVERIFY(r.calls.contains(QStringLiteral("blkdiscard -f --secure -v ") + device.path));
+
+    r = run(M::LuksErase, {});
+    QCOMPARE(r.exitCode, 0);
+    QVERIFY(r.calls.contains(QStringLiteral("cryptsetup luksErase -q ") + device.path));
+
+    // NVMe sanitize: refused when the drive says it is not supported; otherwise started and followed to the end.
+    r = run(M::NvmeSanitizeCrypto, {{"FAKE_CAPS", "  [0:0] : 0\tCrypto Erase Sanitize Operation Not Supported"}});
+    QCOMPARE(r.exitCode, 3);
+    QVERIFY(!called(r, QStringLiteral("nvme sanitize ")));
+    r = run(M::NvmeSanitizeCrypto, {{"FAKE_CAPS", "  [0:0] : 0x1\tCrypto Erase Sanitize Operation Supported"},
+                                    {"FAKE_SANLOG", "Sanitize Progress (SPROG) : 65535\n"
+                                                    "Most Recent Sanitize Command Completed Successfully"}});
+    QCOMPARE(r.exitCode, 0);
+    QVERIFY(r.calls.contains(QStringLiteral("nvme sanitize -a 4 ") + device.path));
+    QVERIFY(r.output.contains(QStringLiteral("Sanitize completed")));
+    r = run(M::NvmeSanitizeBlock, {{"FAKE_SANLOG", "Sanitize Progress (SPROG) : 1\nSanitize Failed"}});
+    QCOMPARE(r.exitCode, 3);
+    QVERIFY(r.calls.contains(QStringLiteral("nvme sanitize -a 2 ") + device.path));
+
+    r = run(M::NvmeFormatCrypto, {{"FAKE_CAPS", "  [2:2] : 0\tCrypto Erase Not Supported as part of Secure Erase"}});
+    QCOMPARE(r.exitCode, 3);
+    QVERIFY(!called(r, QStringLiteral("nvme format")));
+    r = run(M::NvmeFormatCrypto, {{"FAKE_CAPS", "  [2:2] : 0x1\tCrypto Erase Supported as part of Secure Erase"}});
+    QCOMPARE(r.exitCode, 0);
+    QVERIFY(r.calls.contains(QStringLiteral("nvme format ") + device.path + QStringLiteral(" --ses=2 --force")));
+    r = run(M::NvmeFormatUserData, {});
+    QVERIFY(r.calls.contains(QStringLiteral("nvme format ") + device.path + QStringLiteral(" --ses=1 --force")));
+
+    // ATA Secure Erase.
+    const QString security = QStringLiteral("Model: X\\nSecurity: \\n\\tMaster password revision code = 65534\\n"
+                                            "\\t\\tsupported\\n\\tnot\\tenabled\\n\\tnot\\tlocked\\n%1"
+                                            "\\tnot\\texpired: security count\\n%2Logical Unit WWN Device Identifier\\n");
+    const QString ready = security.arg(QStringLiteral("\\tnot\\tfrozen\\n"),
+                                       QStringLiteral("\\t\\tsupported: enhanced erase\\n"));
+    r = run(M::AtaEnhanced, {{"FAKE_HDPARM", security.arg(QStringLiteral("\\t\\tfrozen\\n"),
+                                                          QStringLiteral("\\t\\tsupported: enhanced erase\\n"))}});
+    QCOMPARE(r.exitCode, 3);
+    QVERIFY2(r.output.contains(QStringLiteral("frozen")), qPrintable(r.output));
+    QVERIFY(!called(r, QStringLiteral("hdparm --user-master")));
+    r = run(M::AtaEnhanced, {{"FAKE_HDPARM", security.arg(QStringLiteral("\\tnot\\tfrozen\\n"), QString())}});
+    QCOMPARE(r.exitCode, 3); // no enhanced erase
+    r = run(M::AtaEnhanced, {{"FAKE_HDPARM", ready}});
+    QVERIFY2(r.exitCode == 0, qPrintable(r.output));
+    QCOMPARE(r.calls.filter(QStringLiteral("--user-master")),
+             (QStringList{QStringLiteral("hdparm --user-master u --security-set-pass shred-gui ") + device.path,
+                          QStringLiteral("hdparm --user-master u --security-erase-enhanced shred-gui ") + device.path}));
+    // A failed erase removes the temporary password again.
+    r = run(M::AtaNormal, {{"FAKE_HDPARM", ready}, {"FAKE_ERASE_RC", "5"}});
+    QCOMPARE(r.exitCode, 3);
+    QVERIFY(r.calls.contains(QStringLiteral("hdparm --user-master u --security-disable shred-gui ") + device.path));
+
+    // Paths with spaces and quotes stay one argument.
+    device.path = tmp.filePath(QStringLiteral("it's a disk"));
+    r = run(M::Blkdiscard, {});
+    QCOMPARE(r.exitCode, 0);
+    QVERIFY(r.calls.contains(QStringLiteral("blkdiscard -f -v ") + device.path));
 }
 
 void TestShredCore::inspectRealPaths()

@@ -20,7 +20,11 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   `-u` and `--remove=unlink|wipe|wipesync`, choice of the program (`shred`, `gnushred`, any path),
 - **warnings where overwriting does not reach the old data**: flash storage (SSD, USB stick, memory
   card), copy-on-write and log-structured file systems (btrfs, ZFS, F2FS, …), network, overlay and
-  FUSE file systems, and files with other **hard links**,
+  FUSE file systems, and files with other **hard links**; it also tells whether the data is
+  encrypted there and whether TRIM reaches the device,
+- **flash storage (SSD)**: a preset with one pass and **TRIM after removing** (`fstrim` with
+  administrator rights), and *Tools → Erase a whole device* - NVMe sanitize/format, ATA Secure Erase,
+  LUKS key erase, discard of all blocks (see [Flash storage (SSD)](#flash-storage-ssd)),
 - large directories are scanned in the background (the number of entries is shown, *Cancel* stops it),
 - preview of the generated command, confirmation dialog with the list of files, progress bar
   (by the amount written) with a live **speed graph** behind it, the result of the last run and a
@@ -51,6 +55,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 - Linux, Qt 6 (Core, Widgets, DBus; Test for the tests), CMake ≥ 3.19, a C++17 compiler
 - `shred` (coreutils) — on Ubuntu 25.10+ `/usr/bin/shred` is the uutils (Rust) version
   and GNU shred is available as `gnushred`; both are supported.
+- optional, for flash storage: `pkexec` (polkit) and `fstrim`, `lsblk`, `blkdiscard` (util-linux) for TRIM and
+  *Erase a whole device*; `nvme-cli`, `hdparm`, `cryptsetup` for the methods that use them.
 
 Ubuntu / Debian:
 
@@ -125,7 +131,7 @@ tools/make-deb.sh
 sudo apt install ./build-deb/shred-gui_0.1.0_amd64.deb
 ```
 
-The dependencies are `coreutils` (shred) and the Qt 6 libraries; recommended: `qt6-wayland`; suggested: `dolphin`. The library versions come from the system the package
+The dependencies are `coreutils` (shred) and the Qt 6 libraries; recommended: `qt6-wayland`, `pkexec` (TRIM, erasing a device); suggested: `dolphin`, `nvme-cli`, `hdparm`, `cryptsetup`. The library versions come from the system the package
 is built on (`dpkg-shlibdeps`), so a package built on Ubuntu 26.04 (Qt 6.10) installs on that release and newer
 ones; for an older system build it there. The script builds in a temporary directory under `/tmp`: CPack takes
 the file modes from the staging directory, and a file system without Unix permissions (NTFS, exFAT) would give
@@ -155,10 +161,11 @@ Installed into `<prefix>/share/shred-gui/presets/`:
 |---|---|---|
 | `shred-delete` | Shred and delete permanently (-n 3 -z -u) | 3 passes, `-f`, `-z`, `-v`, removal with `-u` (wipesync) |
 | `shred-overwrite` | Overwrite only, keep the file (-n 3 -z) | 3 passes, `-f`, `-z`, `-v`, no removal |
+| `shred-ssd` | Shred on SSD (one pass, then TRIM) (-n 1 -u + TRIM) | 1 pass, `-f`, `-v`, removal with `-u`, then TRIM of the file system |
 
 A preset is shown under the same name everywhere — in *File → Load preset*, in the title of the
 options section and in the Dolphin menu: the `name` from its file followed by the options that
-decide what is destroyed (`-n`, `-z`, `-s`, the removal mode). The tooltip in *Load preset* shows
+decide what is destroyed (`-n`, `-z`, `-s`, the removal mode, `+ TRIM`). The tooltip in *Load preset* shows
 the whole command and the file.
 
 Presets do not set the program — the one chosen by the user (`shred`/`gnushred`) is kept.
@@ -334,7 +341,58 @@ A whole block device selected as the target (e.g. `/dev/sdb`) is checked as a de
 do not stop shredding: the data is still overwritten as far as the storage allows it. Not detected:
 ext3/ext4 with `data=journal`, the journal itself, compression, backups, and USB adapters of hard
 disks that claim to be removable (a false warning). On flash storage, full-disk encryption from the
-start or the device's own secure erase (`blkdiscard --secure`, `nvme format --ses`) protect reliably.
+start or the device's own secure erase (see below) protect reliably.
+
+## Flash storage (SSD)
+
+On an SSD, USB stick or memory card `shred` overwrites the file, but the controller writes the new data to
+other cells: the old content can stay on the chips (spare area, wear leveling), out of reach of the system.
+More passes do not help there - they only wear the device. What the application does about it:
+
+- **Detection** (see the table above): every target is traced through the device stack in `/sys` - partitions,
+  device mapper (LUKS, LVM), RAID, loop devices - to the physical device. It also finds out:
+  - whether the data is **encrypted** below the file system (dm-crypt: LUKS, plain, VeraCrypt/TrueCrypt -
+    `dm/uuid` starting with `CRYPT-`, or a device named `veracrypt<n>`/`truecrypt<n>`) or by it (eCryptfs,
+    gocryptfs, CryFS, EncFS). The leftovers on the chips are then readable only with the key, and the warning
+    says so;
+  - whether **TRIM reaches the device** (`queue/discard_max_bytes` of the top device > 0). An encrypted volume
+    opened without `allow-discards` blocks it - e.g. VeraCrypt volumes by default, LUKS volumes opened without
+    `cryptsetup open --allow-discards` (or `discard` in `/etc/crypttab`).
+- **Confirmation**: with more than one pass on flash storage it suggests one pass and TRIM, and it lists which
+  file systems will be trimmed and where TRIM does not reach the device.
+- **TRIM after removing** (option, on in the `shred-ssd` preset): when the files are removed, `fstrim -v` runs
+  on the file systems of the targets that are on flash storage and pass discard requests - with `pkexec`
+  (the administrator password is asked for once for all of them; as root directly). It tells the device which
+  blocks are free; most SSDs then read them as zeros and erase the cells - when exactly is up to the
+  controller, so it is no guarantee, but without it the freed cells keep the data until they are reused. The
+  whole file system is trimmed, not only the removed files. A cancelled authentication or a failed `fstrim`
+  is a warning (the files are removed; *Close when finished* keeps the window open).
+- **Tools → Erase a whole device**: the methods that do reach every cell, for a whole device. The dialog lists
+  the disks and partitions (`lsblk`), offers the methods that apply and runs the chosen one with `pkexec`:
+
+  | Method | Devices | Program |
+  |---|---|---|
+  | NVMe sanitize - crypto erase / block erase | NVMe drives | `nvme` (nvme-cli) |
+  | NVMe format - crypto erase / user data erase | NVMe drives | `nvme` (nvme-cli) |
+  | ATA Secure Erase (enhanced / normal) | SATA drives attached directly (not over USB) | `hdparm` |
+  | LUKS - erase all keys (`cryptsetup luksErase`) | LUKS volumes (closed) | `cryptsetup` |
+  | Secure discard / discard of all blocks (`blkdiscard`) | devices that support discard | `blkdiscard` (util-linux) |
+
+  Safeguards: devices in use - mounted, swap, open dm-crypt/LVM/RAID devices on them, also on other partitions
+  of a disk - cannot be erased; a free partition of a disk with other partitions in use gets a warning (it may
+  belong to another operating system). The confirmation shows the model, serial number, size and content and
+  wants the device name typed and a backup confirmed. The script that runs as root checks again, right before
+  the erase, that the device has the same size and serial number and that nothing on it is mounted or open,
+  and the method's own conditions: the drive must report support for the NVMe operation, an ATA drive must not
+  be *frozen* (suspend and resume the computer to unfreeze it) or have a password already. ATA Secure Erase sets
+  a temporary drive password (`shred-gui`) that the erase removes; if the erase fails, the password is removed
+  again. The full script is shown in the dialog's log before it runs. An NVMe sanitize cannot be stopped and
+  continues after a power loss; the dialog follows its progress (`nvme sanitize-log`). A hard disk is
+  overwritten reliably by selecting it as a target in the main window instead.
+
+  Not tested on real drives by the tests (they run the scripts with fake `lsblk`/`nvme`/`hdparm`/`cryptsetup`/
+  `blkdiscard` programs): the exact output of `nvme id-ctrl -H` / `nvme sanitize-log` and `hdparm -I` of your
+  drive model decides the checks; an unexpected output stops the script or leaves the decision to the drive.
 
 ## AI disclosure
 

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;inode/directory;
+X-KDE-Protocols=file
+X-KDE-Submenu=Shred
+X-KDE-Priority=TopLevel
+Icon=edit-delete-shred
+Actions=shredSsd;
+
+[Desktop Action shredSsd]
+Name=Shred on SSD (one pass, then TRIM) (-n 1 -u + TRIM)…
+Icon=edit-delete-shred
+Exec=@SHRED_GUI_EXECUTABLE@ --preset shred-ssd %U

@@ -15,6 +15,20 @@ struct Info
     QString source;     // the mounted device or share, e.g. "/dev/mapper/root"
     QString mountPoint; // empty for a device given directly
     bool flash = false; // SSD, USB stick or memory card (or a device stacked on one)
+    // The data is encrypted below the file system (dm-crypt: LUKS, plain, VeraCrypt/TrueCrypt) or by it
+    // (eCryptfs, gocryptfs, CryFS, EncFS): what stays on the storage is readable only with the key.
+    bool encrypted = false;
+    // Discard (TRIM) requests reach the storage: fstrim can tell flash storage which blocks are free. Not
+    // through a device mapper device that does not pass them (e.g. dm-crypt without allow-discards).
+    bool discard = false;
+};
+
+// What the block device stack in sysfs tells (see Info).
+struct DeviceStack
+{
+    bool flash = false;
+    bool encrypted = false;
+    bool discard = false;
 };
 
 // The storage of an existing file or directory (symlinks are not followed).
@@ -33,5 +47,9 @@ Info parseMountInfo(const QByteArray &mountInfo, quint32 major, quint32 minor, c
 // Devices stacked on others (device mapper: LUKS, LVM; RAID) are decided by the devices below them,
 // loop devices by the storage of their backing file.
 bool isFlashDevice(const QString &sysfsBlockDir);
+// The whole stack below a block device in sysfs.
+DeviceStack inspectStack(const QString &sysfsBlockDir);
+// Whether the file system itself encrypts the data (its type in mountinfo).
+bool isEncryptingFileSystem(const QString &fileSystem);
 
 } // namespace StorageCheck

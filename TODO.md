@@ -51,7 +51,15 @@
       keep the names of the shredded files) - `RunLog`, one file per run in `~/.local/state/shred-gui/logs`
 - [x] *Quit* button next to *Shred* and *Cancel*
 
+- [x] Flash storage (SSD): encryption and discard detected through the device stack, `shred-ssd` preset
+      (one pass + TRIM), TRIM after removing (`pkexec fstrim`), *Tools → Erase a whole device* (NVMe
+      sanitize/format, ATA Secure Erase, LUKS key erase, blkdiscard) - scripts tested with fake tools only
+
 ## To do
+
+- [ ] Check with the user on real drives: TRIM after removing (pkexec prompt), *Erase a whole device* on a
+      spare USB stick / SSD (blkdiscard, LUKS key erase; NVMe and ATA methods only on a drive meant to be
+      wiped) - the parsing of `nvme id-ctrl -H`, `nvme sanitize-log` and `hdparm -I` of real drives
 
 - [ ] Application icon (currently the `edit-delete` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)

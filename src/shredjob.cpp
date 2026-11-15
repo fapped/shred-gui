@@ -231,10 +231,11 @@ ShredJob::Plan ShredJob::scan(const QString &target, ScanControl *control)
             plan.hardLinked << plan.target;
         // A block device is overwritten as a whole - what matters is the device itself, not /dev.
         if (S_ISBLK(st.st_mode))
-            plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspectDevice(::major(st.st_rdev),
-                                                                                      ::minor(st.st_rdev)));
+            plan.storage = StorageCheck::inspectDevice(::major(st.st_rdev), ::minor(st.st_rdev));
         else if (plan.type == TargetType::File)
-            plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspect(plan.target));
+            plan.storage = StorageCheck::inspect(plan.target);
+        if (S_ISBLK(st.st_mode) || plan.type == TargetType::File)
+            plan.storageWarnings = StorageCheck::warnings(plan.storage);
         if (plan.type == TargetType::File) {
             if (const QByteArray parent = parentDirectory(LocalPath::encode(plan.target)); !canModifyDirectory(parent))
                 plan.unwritableDirs << LocalPath::decode(parent);
@@ -255,7 +256,8 @@ ShredJob::Plan ShredJob::scan(const QString &target, ScanControl *control)
             break;
         }
         if (scanDirectory(root, st.st_dev, plan, control)) {
-            plan.storageWarnings = StorageCheck::warnings(StorageCheck::inspect(plan.target));
+            plan.storage = StorageCheck::inspect(plan.target);
+            plan.storageWarnings = StorageCheck::warnings(plan.storage);
             // The target itself is removed from its parent directory.
             if (const QByteArray parent = parentDirectory(root); !canModifyDirectory(parent))
                 plan.unwritableDirs << LocalPath::decode(parent);
@@ -421,6 +423,114 @@ void ShredJob::startNext()
         m_planAnnounced = false;
     }
     m_summary.cancelled = m_cancelRequested;
+    if (!startTrim())
+        finish();
+}
+
+QStringList ShredJob::trimMountPoints(const QList<Plan> &plans, QStringList *withoutDiscard)
+{
+    QStringList mountPoints;
+    for (const Plan &plan : plans) {
+        // A block device selected directly has no file system to trim; nothing was removed from a missing target.
+        const QString &mountPoint = plan.storage.mountPoint;
+        if (!plan.error.isEmpty() || !plan.storage.flash || mountPoint.isEmpty())
+            continue;
+        QStringList *list = plan.storage.discard ? &mountPoints : withoutDiscard;
+        if (list && !list->contains(mountPoint))
+            *list << mountPoint;
+    }
+    return mountPoints;
+}
+
+QStringList ShredJob::trimCommand(const ShredOptions &options, const QStringList &mountPoints)
+{
+    // pkexec runs programs given with their full path; fstrim is often in /usr/sbin, outside the PATH of users.
+    QString fstrim = options.fstrimProgram;
+    if (!fstrim.contains(QLatin1Char('/'))) {
+        const QString found = QStandardPaths::findExecutable(fstrim);
+        fstrim = !found.isEmpty() ? found
+                                  : QStandardPaths::findExecutable(fstrim, {QStringLiteral("/usr/sbin"), QStringLiteral("/sbin")});
+        if (fstrim.isEmpty())
+            fstrim = options.fstrimProgram;
+    }
+    QStringList command;
+    if (!options.elevateProgram.isEmpty() && ::geteuid() != 0)
+        command << options.elevateProgram;
+    command << QStringLiteral("/bin/sh") << QStringLiteral("-c")
+            << QStringLiteral("rc=0; for m; do %1 -v -- \"$m\" || rc=$?; done; exit $rc").arg(shellQuote(fstrim))
+            << QStringLiteral("sh") << mountPoints;
+    return command;
+}
+
+bool ShredJob::startTrim()
+{
+    if (!m_options.trimAfter || m_cancelRequested || !m_options.removesFiles())
+        return false;
+    QStringList withoutDiscard;
+    const QStringList mountPoints = trimMountPoints(m_plans, &withoutDiscard);
+    for (const QString &mountPoint : std::as_const(withoutDiscard)) {
+        emit log(LogLevel::Warning, tr("TRIM skipped for %1: discard requests do not reach the flash storage there "
+                                       "(e.g. an encrypted volume opened without allow-discards).")
+                                        .arg(LocalPath::display(mountPoint)));
+    }
+    if (mountPoints.isEmpty()) {
+        if (withoutDiscard.isEmpty())
+            emit log(LogLevel::Info, tr("TRIM not needed: none of the targets is on flash storage."));
+        return false;
+    }
+
+    const QStringList command = trimCommand(m_options, mountPoints);
+    emit log(LogLevel::Info, tr("TRIM of %1 (administrator rights are needed):")
+                                 .arg(LocalPath::display(mountPoints.join(QStringLiteral(", ")))));
+    emit log(LogLevel::Info, QStringLiteral("$ ") + commandLine(command.first(), command.mid(1)));
+    emit currentFileChanged(QString());
+    m_trimming = true;
+    m_pending.clear();
+    m_process = new QProcess(this);
+    m_process->setProcessChannelMode(QProcess::MergedChannels);
+    m_process->setStandardInputFile(QProcess::nullDevice());
+    connect(m_process, &QProcess::readyRead, this, &ShredJob::onReadyRead);
+    connect(m_process, &QProcess::finished, this, &ShredJob::onTrimFinished);
+    connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart && m_process)
+            onTrimFinished(-1, QProcess::CrashExit);
+    });
+    m_process->start(command.first(), command.mid(1));
+    return true;
+}
+
+void ShredJob::onTrimFinished(int exitCode, QProcess::ExitStatus status)
+{
+    if (!m_process || !m_trimming)
+        return;
+    const QString errorString = m_process->error() == QProcess::FailedToStart ? m_process->errorString() : QString();
+    onReadyRead();
+    if (!m_pending.trimmed().isEmpty())
+        emit log(LogLevel::Output, QString::fromLocal8Bit(m_pending).trimmed());
+    m_pending.clear();
+    m_process->disconnect(this);
+    m_process->deleteLater();
+    m_process = nullptr;
+    m_trimming = false;
+
+    const bool elevated = !m_options.elevateProgram.isEmpty() && ::geteuid() != 0;
+    if (!errorString.isEmpty()) {
+        emit log(LogLevel::Warning, tr("TRIM could not be started: %1").arg(errorString));
+    } else if (status == QProcess::NormalExit && exitCode == 0) {
+        m_summary.trimmed = int(trimMountPoints(m_plans).size());
+        emit log(LogLevel::Success, tr("TRIM done - the device can erase the freed cells."));
+    } else if (m_cancelRequested) {
+        emit log(LogLevel::Warning, tr("TRIM cancelled."));
+    } else if (elevated && status == QProcess::NormalExit && exitCode == 126) {
+        emit log(LogLevel::Warning, tr("TRIM skipped: the authentication was cancelled."));
+    } else if (elevated && status == QProcess::NormalExit && exitCode == 127) {
+        emit log(LogLevel::Warning, tr("TRIM skipped: not authorized (or fstrim was not found)."));
+    } else {
+        emit log(LogLevel::Warning, tr("TRIM failed (exit code %1) - the files are removed, but the device was not "
+                                       "told which blocks are free.")
+                                        .arg(exitCode));
+    }
+    m_summary.cancelled = m_summary.cancelled || m_cancelRequested;
     finish();
 }
 
@@ -461,6 +571,8 @@ void ShredJob::onReadyRead()
         if (line.isEmpty())
             continue;
         emit log(LogLevel::Output, line);
+        if (m_trimming)
+            continue; // fstrim: "/data: 1,2 GiB (1288490188 bytes) trimmed on /dev/sda2"
         // "shred: FILE: pass 2/4 (random)..." - progress is taken from the last segment only,
         // because the path itself may contain digits and slashes.
         const QString tail = line.mid(line.lastIndexOf(QStringLiteral(": ")) + 1);

@@ -1,0 +1,18 @@
+{
+    "format": "shred-gui-settings",
+    "version": 1,
+    "name": "Shred on SSD (one pass, then TRIM)",
+    "options": {
+        "iterations": 1,
+        "force": true,
+        "verbose": true,
+        "exact": false,
+        "zero": false,
+        "useSize": false,
+        "size": "",
+        "useRandomSource": false,
+        "randomSource": "",
+        "removeMode": "default",
+        "trimAfter": true
+    }
+}

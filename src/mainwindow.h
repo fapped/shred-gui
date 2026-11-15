@@ -80,6 +80,7 @@ private:
     void importSettings();
     void exportSettings();
     void showAbout();
+    void showDeviceErase();
     bool isBusy() const; // scanning or shredding
     void startShred();
     void confirmAndStart(const QList<ShredJob::Plan> &scanned, const QStringList &notes);
@@ -116,12 +117,14 @@ private:
     QLineEdit *m_randomEdit = nullptr;
     QPushButton *m_randomBrowse = nullptr;
     QComboBox *m_removeCombo = nullptr;
+    QCheckBox *m_trimCheck = nullptr; // ShredOptions::trimAfter
     QGroupBox *m_optionsBox = nullptr;
     QGroupBox *m_targetBox = nullptr;
     QScrollArea *m_optionsScroll = nullptr; // m_optionsBox, scrolls when its section is small
     QSplitter *m_splitter = nullptr; // targets | options | log, the user drags the handles between them
     QAction *m_importAction = nullptr;
     QAction *m_exportAction = nullptr;
+    QAction *m_eraseDeviceAction = nullptr;
     QMenu *m_presetMenu = nullptr;
     QMenu *m_recentSettingsMenu = nullptr;
 
