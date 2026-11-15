@@ -66,5 +66,6 @@
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [x] `.deb` package: `tools/make-deb.sh` (CPack, dependencies from dpkg-shlibdeps), checked with apt in a
       clean Ubuntu 26.04 container (2026-11-15)
-- [ ] AppImage (own Qt: no Plasma theme plugin, the Dolphin menu needs an install option), CI (Gitea Actions:
-      build + tests + the .deb; needs a runner)
+- [x] CI on GitHub: `.github/workflows/deb.yml` (self-hosted runner: tests + the .deb, artifact, release for
+      tags `v*`) - its steps checked locally on a fresh clone; the first run on the runner not seen yet
+- [ ] AppImage (own Qt: no Plasma theme plugin, the Dolphin menu needs an install option)
