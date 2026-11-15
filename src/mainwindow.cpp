@@ -335,8 +335,9 @@ void MainWindow::buildUi()
     m_quitButton = new QPushButton(QIcon::fromTheme(QStringLiteral("application-exit")), tr("Quit"), central);
     m_quitButton->setToolTip(tr("Close Shred GUI (while shredding, asks first whether to cancel it)."));
     m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
-    m_closeWhenFinishedCheck->setToolTip(tr("Quit Shred GUI after everything was shredded successfully. After errors "
-                                            "or cancelling the window stays open."));
+    m_closeWhenFinishedCheck->setToolTip(tr("Quit Shred GUI after everything was shredded successfully. After errors, "
+                                            "warnings (e.g. a skipped mount point) or cancelling the window stays "
+                                            "open."));
     runRow->addWidget(m_progress, 1);
     runRow->addWidget(m_closeWhenFinishedCheck);
     runRow->addWidget(m_startButton);
@@ -1310,7 +1311,7 @@ void MainWindow::onJobFinished()
         m_desktopProgress->finish(true);
     else
         m_desktopProgress->finish(false, tr("Not everything could be shredded or removed."));
-    if (summary.ok() && m_closeWhenFinishedCheck->isChecked()) {
+    if (summary.clean() && m_closeWhenFinishedCheck->isChecked()) {
         // A short moment to see the result; unchecking the box in the meantime keeps the window open.
         m_resultLabel->setText(tr("Finished successfully. Closing..."));
         QTimer::singleShot(1500, this, [this] {
@@ -1318,7 +1319,7 @@ void MainWindow::onJobFinished()
                 close();
         });
     } else if (summary.ok()) {
-        m_resultLabel->setText(tr("Finished successfully."));
+        m_resultLabel->setText(summary.clean() ? tr("Finished successfully.") : tr("Finished with warnings - see the log."));
     } else if (summary.cancelled) {
         m_resultLabel->setText(tr("Cancelled."));
     } else {

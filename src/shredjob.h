@@ -55,6 +55,7 @@ public:
         int othersFailed = 0;
         int dirsRemoved = 0;
         int dirsFailed = 0;
+        int warnings = 0; // warnings and errors in the log of the job (e.g. a mount point skipped)
         bool cancelled = false;
         bool aborted = false; // e.g. shred could not be started
 
@@ -62,6 +63,8 @@ public:
         {
             return !cancelled && !aborted && filesFailed == 0 && othersFailed == 0 && dirsFailed == 0;
         }
+        // Everything done without a single warning: e.g. for closing the window when finished.
+        bool clean() const { return ok() && warnings == 0; }
     };
 
     // Lets another thread follow and cancel a scan.

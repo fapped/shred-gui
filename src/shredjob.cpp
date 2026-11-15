@@ -316,6 +316,10 @@ ShredJob::ShredJob(QList<Plan> plans, ShredOptions options, QObject *parent)
 {
     m_pollTimer.setInterval(WrittenBytesIntervalMs);
     connect(&m_pollTimer, &QTimer::timeout, this, &ShredJob::pollWrittenBytes);
+    connect(this, &ShredJob::log, this, [this](LogLevel level) {
+        if (m_running && (level == LogLevel::Warning || level == LogLevel::Error))
+            ++m_summary.warnings;
+    });
     // Each file is one step, plus one step per target for removing symlinks and directories.
     const int passes = m_options.iterations + (m_options.zero ? 1 : 0);
     for (const Plan &plan : std::as_const(m_plans)) {

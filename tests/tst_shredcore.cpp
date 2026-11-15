@@ -427,6 +427,7 @@ void TestShredCore::shredDirectory()
     connect(&job, &ShredJob::log, this, [&log](ShredJob::LogLevel, const QString &t) { log << t; });
     QVERIFY(runJob(job));
     QVERIFY2(job.summary().ok(), qPrintable(log.join('\n')));
+    QVERIFY2(job.summary().clean(), qPrintable(log.join('\n'))); // closes the window when finished
     QCOMPARE(job.summary().filesShredded, 3);
     QCOMPARE(job.summary().othersRemoved, 2);
     QCOMPARE(job.summary().dirsRemoved, 4);
@@ -457,6 +458,16 @@ void TestShredCore::shredFileWithoutRemoving()
     const QByteArray after = readFile(file);
     QCOMPARE(after.size(), original.size());
     QCOMPARE(after, QByteArray(original.size(), '\0'));
+    QVERIFY(job.summary().clean());
+
+    // A directory without removal: shredded, but "directory stays on disk" is a warning - the window stays open.
+    QVERIFY(QDir().mkpath(tmp.filePath(QStringLiteral("dir"))));
+    writeFile(tmp.filePath(QStringLiteral("dir/inner")), "x");
+    ShredJob dirJob(ShredJob::scan(tmp.filePath(QStringLiteral("dir"))), options);
+    QVERIFY(runJob(dirJob));
+    QVERIFY(dirJob.summary().ok());
+    QCOMPARE(dirJob.summary().warnings, 1);
+    QVERIFY(!dirJob.summary().clean());
 }
 
 void TestShredCore::missingProgramAborts()

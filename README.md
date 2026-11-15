@@ -31,7 +31,9 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
 - **resizable sections**: the handles between the list, the options and the log can be dragged (the
   options scroll when their section is small); the sizes are remembered with the window size,
 - options are remembered between runs; *Close when finished* quits the application after
-  a fully successful run (after errors or cancelling the window stays open); *Quit* closes the
+  a fully successful run - without a single error or warning in its log (after errors, warnings such
+  as a skipped mount point or a directory left on disk with removal off, or cancelling the window
+  stays open with *Finished with warnings - see the log.*); *Quit* closes the
   window (while shredding it asks first whether to cancel),
 - optional **log files**: *Save the log to a file* (under the log; off by default) writes the log of
   every run to `~/.local/state/shred-gui/logs/<date>_<time>.log`, readable by you only. The log
