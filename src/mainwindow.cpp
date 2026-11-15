@@ -34,7 +34,9 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
+#include <QSplitter>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -109,6 +111,11 @@ void MainWindow::buildUi()
 {
     auto *central = new QWidget(this);
     auto *mainLayout = new QVBoxLayout(central);
+    // The three sections in a splitter: the user can drag the handles between them to give one section more
+    // room at the cost of the others. None can be collapsed (a hidden section would look like a missing one).
+    m_splitter = new QSplitter(Qt::Vertical, central);
+    m_splitter->setChildrenCollapsible(false);
+    mainLayout->addWidget(m_splitter, 1);
 
     // --- Targets ---
     m_targetBox = new QGroupBox(tr("Files and directories to shred"), central);
@@ -177,7 +184,7 @@ void MainWindow::buildUi()
     m_pathInfo = new QLabel(m_targetBox);
     m_pathInfo->setWordWrap(true);
     targetLayout->addWidget(m_pathInfo);
-    mainLayout->addWidget(m_targetBox, 1);
+    m_splitter->addWidget(m_targetBox);
 
     // --- Options ---
     m_optionsBox = new QGroupBox(optionsBoxTitle(), central);
@@ -255,7 +262,16 @@ void MainWindow::buildUi()
     settingsRow->addWidget(importButton);
     settingsRow->addWidget(exportButton);
     form->addRow(QString(), settingsRow);
-    mainLayout->addWidget(m_optionsBox);
+    // The options scroll when their section is made smaller than they need (like in rsync-gui) and the section
+    // cannot be made larger than they need - there is nothing more to show.
+    m_optionsScroll = new QScrollArea(central);
+    m_optionsScroll->setWidget(m_optionsBox);
+    m_optionsScroll->setWidgetResizable(true);
+    m_optionsScroll->setFrameShape(QFrame::NoFrame);
+    m_optionsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_optionsScroll->setMinimumHeight(80);
+    m_optionsScroll->setMaximumHeight(m_optionsBox->sizeHint().height());
+    m_splitter->addWidget(m_optionsScroll);
 
     // --- Log ---
     auto *logBox = new QGroupBox(tr("Log"), central);
@@ -291,7 +307,11 @@ void MainWindow::buildUi()
     logButtons->addWidget(clearLog);
     logLayout->addWidget(m_log, 1);
     logLayout->addLayout(logButtons);
-    mainLayout->addWidget(logBox, 1);
+    m_splitter->addWidget(logBox);
+    // Extra room (a larger window) goes to the list and the log, as before, not to the options.
+    m_splitter->setStretchFactor(0, 1);
+    m_splitter->setStretchFactor(1, 0);
+    m_splitter->setStretchFactor(2, 1);
 
     // --- Command preview ---
     auto *previewRow = new QHBoxLayout;
@@ -481,6 +501,7 @@ void MainWindow::loadSettings()
     applyOptions(options);
     m_closeWhenFinishedCheck->setChecked(settings.value(QStringLiteral("window/closeWhenFinished"), false).toBool());
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
+    m_splitter->restoreState(settings.value(QStringLiteral("window/splitter")).toByteArray());
 }
 
 void MainWindow::saveSettings() const
@@ -489,6 +510,7 @@ void MainWindow::saveSettings() const
     if (m_rememberOptions)
         currentOptions().save(settings);
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
+    settings.setValue(QStringLiteral("window/splitter"), m_splitter->saveState());
 }
 
 void MainWindow::setOptionsSource(const QString &description)

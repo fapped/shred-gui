@@ -28,6 +28,8 @@ A Qt 6 graphical front-end for the `shred` command line tool from GNU coreutils 
   and when the day changes), cancellation,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (current file, speed, a cancel button, a summary at the end),
+- **resizable sections**: the handles between the list, the options and the log can be dragged (the
+  options scroll when their section is small); the sizes are remembered with the window size,
 - options are remembered between runs; *Close when finished* quits the application after
   a fully successful run (after errors or cancelling the window stays open); *Quit* closes the
   window (while shredding it asks first whether to cancel),

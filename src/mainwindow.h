@@ -15,6 +15,8 @@ class QAction;
 class QCheckBox;
 class QComboBox;
 class QGroupBox;
+class QScrollArea;
+class QSplitter;
 class ElidedLabel;
 class QLabel;
 class QLineEdit;
@@ -116,6 +118,8 @@ private:
     QComboBox *m_removeCombo = nullptr;
     QGroupBox *m_optionsBox = nullptr;
     QGroupBox *m_targetBox = nullptr;
+    QScrollArea *m_optionsScroll = nullptr; // m_optionsBox, scrolls when its section is small
+    QSplitter *m_splitter = nullptr; // targets | options | log, the user drags the handles between them
     QAction *m_importAction = nullptr;
     QAction *m_exportAction = nullptr;
     QMenu *m_presetMenu = nullptr;
